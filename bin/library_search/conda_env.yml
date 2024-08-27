@@ -1,0 +1,12 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8.8
+  - pandas
+  - pip:
+    - xmltodict
+    - requests
+    - requests_cache
+    - tqdm
+    - pyteomics
