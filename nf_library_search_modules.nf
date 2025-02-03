@@ -1,4 +1,4 @@
-params.publishDir = "./nf_output"
+params.publish_dir = "./nf_output"
 params.TOOL_FOLDER = "$moduleDir/bin/library_search"
 
 process searchDataGNPS {
@@ -116,7 +116,7 @@ process chunkResults {
 
 // Use a separate process to merge all the batched results
 process mergeResults {
-    publishDir params.publishDir, mode: 'copy'
+    publishDir params.publish_dir, mode: 'copy'
     
     conda "$params.TOOL_FOLDER/conda_env.yml"
 
@@ -138,7 +138,7 @@ process mergeResults {
 }
 
 process librarygetGNPSAnnotations {
-    publishDir params.publishDir, mode: 'copy'
+    publishDir params.publish_dir, mode: 'copy'
 
     cache 'lenient'
 
@@ -164,7 +164,7 @@ process librarygetGNPSAnnotations {
 }
 
 process filtertop1Annotations {
-    publishDir params.publishDir, mode: 'copy'
+    publishDir params.publish_dir, mode: 'copy'
 
     cache 'lenient'
 
@@ -184,7 +184,7 @@ process filtertop1Annotations {
 }
 
 process summaryLibrary {
-    publishDir params.publishDir, mode: 'copy'
+    publishDir params.publish_dir, mode: 'copy'
 
     cache 'lenient'
 
