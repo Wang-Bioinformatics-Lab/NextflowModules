@@ -1,0 +1,15 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.13
+  - pandas
+  - numpy=1.24.3
+  - numba=0.58.1
+  - pip:
+    - xmltodict
+    - requests
+    - requests_cache
+    - tqdm
+    - pyteomics
+    - lxml

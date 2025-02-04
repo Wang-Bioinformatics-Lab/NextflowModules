@@ -39,6 +39,47 @@ process searchDataGNPS {
     """
 }
 
+process searchDataGNPSNew{
+
+    publishDir params.publishDir, mode: 'copy'
+
+    conda "$params.TOOL_FOLDER/conda_env_gnps_new.yml"
+
+    cache 'lenient'
+
+    input:
+    tuple file(input_library), file(input_spectrum)
+    val search_algorithm
+    val analog_search
+    val analog_max_shift
+    val pm_tolerance
+    val fragment_tolerance
+    val library_min_similarity
+    val library_min_matched_peaks
+    val peak_transformation
+    val unmatched_penalty_factor
+
+    output:
+    file 'search_results/*' optional true
+
+    """
+    mkdir -p search_results
+
+    python $params.TOOL_FOLDER/gnps_new/main_search.py \
+        --gnps_lib_mgf "$input_library" \
+        --qry_file "$input_spectrum" \
+        --algorithm $search_algorithm \
+        --analog_search $analog_search \
+        --analog_max_shift $analog_max_shift \
+        --pm_tol $pm_tolerance \
+        --frag_tol $fragment_tolerance \
+        --min_score $library_min_similarity \
+        --min_matched_peak $library_min_matched_peaks \
+        --peak_transformation $peak_transformation \
+        --unmatched_penalty_factor $unmatched_penalty_factor
+    """
+}
+
 process searchDataBlink {
     //publishDir "./nf_output", mode: 'copy'
 
