@@ -144,7 +144,8 @@ def cosine_similarity(qry_spec: np.ndarray, ref_spec: np.ndarray,
                       min_matched_peak: int = 1,
                       sqrt_transform: bool = True,
                       penalty: float = 0.,
-                      shift: float = 0.0):
+                      shift: float = 0.0,
+                      require_sorted:bool = False) -> Tuple[float, int]:
     """
     Calculate similarity between two spectra.
 
@@ -164,6 +165,15 @@ def cosine_similarity(qry_spec: np.ndarray, ref_spec: np.ndarray,
         Penalty for unmatched peaks. If set to 0, traditional cosine score; if set to 1, traditional reverse cosine score.
     shift: float
         Shift for m/z values. If not 0, hybrid search is performed. shift = prec_mz(qry) - prec_mz(ref)
+    require_sorted: bool
+        If True, requires spectra sorted by m/z. If False, sorts the spectra by m/z if needed.
+
+    Returns
+    -------
+    score: float
+        Similarity score between 0 and 1.
+    n_matches: int
+        Number of matched peaks.
     """
     tolerance = np.float32(tolerance)
     penalty = np.float32(penalty)
@@ -171,6 +181,18 @@ def cosine_similarity(qry_spec: np.ndarray, ref_spec: np.ndarray,
 
     if qry_spec.size == 0 or ref_spec.size == 0:
         return 0.0, 0
+    
+    if require_sorted:
+        if not np.all(qry_spec[:, 0][:-1] <= qry_spec[:, 0][1:]):   # True for array of shape [1,2]
+            raise ValueError("Query spectrum is not sorted by m/z.")
+        if not np.all(ref_spec[:, 0][:-1] <= ref_spec[:, 0][1:]):
+            raise ValueError("Reference spectrum is not sorted by m/z.")
+    else:
+        if not np.all(qry_spec[:, 0][:-1] <= qry_spec[:, 0][1:]):
+            qry_spec = qry_spec[np.argsort(qry_spec[:, 0])]
+        if not np.all(ref_spec[:, 0][:-1] <= ref_spec[:, 0][1:]):
+            ref_spec = ref_spec[np.argsort(ref_spec[:, 0])]
+
 
     # normalize the intensity
     ref_spec[:, 1] /= np.max(ref_spec[:, 1])
