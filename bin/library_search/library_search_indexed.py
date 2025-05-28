@@ -89,11 +89,12 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
             score, shared, shifted, num_matches = calculate_exact_score_GNPS(spectra[query_idx], target_spec, tolerance)
             # print("log", f"Score for candidate {lib_idx}: {score}, Shared: {shared}, Shifted: {shifted}, Matches: {num_matches}")
             if score >= threshold:
-                exact_matches.append((spec_idx, score, shared, shifted, num_matches))
+                exact_matches.append((lib_idx, score, shared, shifted, num_matches))
 
         # Sort and store top results
         exact_matches.sort(key=lambda x: -x[1])
-        results.append((query_idx, exact_matches[:topk]))
+        size_val = min(topk, len(exact_matches))
+        results.append((query_idx, exact_matches[:size_val]))
 
     return results
 
@@ -197,6 +198,19 @@ def read_mgf_spectrum(file_obj):
                     except:
                         continue
                 else:
+                    if key in ['CHARGE', 'charge']:
+                        if type(value) is str:
+                            sign = 1
+                            if "-" in value:
+                                value = value.replace("-", "")
+                                sign = -1
+                            value = value.replace("+", "")
+                            if value.isdigit():
+                                value=int(value) * sign
+                            else:
+                                value=1* sign  # Default to 1 if not a valid integer
+                        else:
+                            value = int(value)
                     spectrum[key] = value
             else:
                 # If no '=' found, treat as peak data
@@ -239,7 +253,7 @@ def main():
     parser.add_argument('--fragment_tolerance', default=0.5, help='fragment_tolerance')
     parser.add_argument('--library_min_cosine', default=0.7, help='library_min_cosine')
     parser.add_argument('--library_min_matched_peaks', default=6, help='library_min_matched_peaks')
-    parser.add_argument('--topk', default=1, help='topk')
+    parser.add_argument('--topk', default=1, help='topk', type=int)
     parser.add_argument('--analog_search', default=0, help='Turn on analog search, 0 or 1', type=int)
     parser.add_argument('--threads', default=1, type=int, help='Number of threads to use for parallel processing')
 
@@ -247,7 +261,7 @@ def main():
     parser.add_argument('--full_relative_query_path', default=None, help='This is the original full relative path of the input file')
     
     args = parser.parse_args()
-    
+    print("topk", args.topk)
     # print("spectrum_file:", args.spectrum_file)
     
     spectrum_mgf = read_mgf(args.spectrum_file)
@@ -260,14 +274,7 @@ def main():
         intensity = [float(x[1]) for x in data_dict['peaks']]
         precursor_mz = float(data_dict.get('PEPMASS', 0.0))
         precursor_charge = data_dict.get('CHARGE', data_dict.get('charge', 1))
-        if type(precursor_charge) is str:
-            precursor_charge = precursor_charge.rstrip("+")
-            if precursor_charge.isdigit():
-                precursor_charge=int(precursor_charge)
-            else:
-                precursor_charge=1
-        else:
-            precursor_charge = int(precursor_charge)
+        precursor_charge = abs(int(precursor_charge))  # Ensure charge is positive
         # print("log", f"Converted spectrum with {len(mz)} peaks, precursor_mz: {precursor_mz}, precursor_charge: {precursor_charge}")
         # print("log", f"mz: {mz[:5]}, intensity: {intensity[:5]}")
         mz = np.asarray(mz, dtype=np.float32)

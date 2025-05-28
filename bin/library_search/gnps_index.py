@@ -425,7 +425,7 @@ def calculate_exact_score_GNPS_multi_charge(query_spec, target_spec, TOLERANCE):
 
     # Handle cases with no matches
     if match_count == 0:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
 
     # Extract valid entries
     valid_scores = scores_arr[:match_count]
