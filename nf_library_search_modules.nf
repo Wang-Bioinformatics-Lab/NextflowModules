@@ -39,6 +39,44 @@ process searchDataGNPS {
     """
 }
 
+process searchDataGNPSIndexed {
+    //publishDir "./nf_output", mode: 'copy'
+
+    conda "$params.TOOL_FOLDER/conda_env.yml"
+
+    cache 'lenient'
+
+    input:
+    tuple file(input_library), file(input_spectrum), val(input_path), val(full_path)
+    val pm_tolerance
+    val fragment_tolerance
+    val topk
+    val library_min_cosine
+    val library_min_matched_peaks
+    val analog_search
+
+    output:
+    file 'search_results/*' optional true
+
+    """
+    mkdir -p search_results
+
+    python $params.TOOL_FOLDER/library_search_indexed.py \
+        "$input_spectrum" \
+        "$input_library" \
+        search_results \
+        $params.TOOL_FOLDER/convert \
+        $params.TOOL_FOLDER/main_execmodule.allcandidates \
+        --pm_tolerance "$pm_tolerance" \
+        --fragment_tolerance "$fragment_tolerance" \
+        --topk $topk \
+        --library_min_cosine $library_min_cosine \
+        --library_min_matched_peaks $library_min_matched_peaks \
+        --analog_search "$analog_search" \
+        --full_relative_query_path "$full_path"
+    """
+}
+
 process searchDataGNPSNew{
 
     publishDir params.publishDir, mode: 'copy'

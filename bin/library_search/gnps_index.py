@@ -21,6 +21,33 @@ SpectrumTuple = numba.types.Tuple([
     numba.int32  # precursor_charge
 ])
 
+# def normalize_peaks(self, change_self = True):
+#     """l2 Normalize the intensity of the Spectrum object.
+    
+#     Parameters
+#     ----------
+#     change_self : bool, default is True
+#         If True, the intensity of the Spectrum object will be normalized in place.
+#         If False, a new Spectrum object with the normalized intensity will be returned.
+    
+#     Returns
+#     -------
+#     None
+#         If change_self is True, the intensity of the Spectrum object will be normalized in place.
+#     Spectrum
+#         A new Spectrum object with the normalized intensity.
+#     """
+    
+#     l2_norm = np.linalg.norm(self.intensity)
+#     new_intensity = [intensity / l2_norm for intensity in self.intensity]
+    
+#     if change_self:
+#         self.intensity = new_intensity
+#     else:
+#         new_spectrum = self.copy()
+#         new_spectrum.intensity = new_intensity
+#         return new_spectrum
+
 def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_charge):
     """Only apply sqrt transform and L2 normalization without filtering"""
     if len(mz_array) == 0:
@@ -35,7 +62,7 @@ def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_ch
     sorted_idx = np.argsort(mz_array)
     mz_sorted = mz_array[sorted_idx].astype(np.float32)
     int_sorted = intensity_array[sorted_idx].astype(np.float32)
-    int_sorted = np.sqrt(int_sorted)
+    # int_sorted = np.sqrt(int_sorted)
 
     # Apply sqrt transform and L2 normalization
     norm = np.linalg.norm(int_sorted)
@@ -160,7 +187,7 @@ def create_index(spectra, is_shifted, tolerance, shifted_offset):
         for peak_idx in range(len(mz_arr)):
             mz = mz_arr[peak_idx]
             intensity = spec[1][peak_idx]
-
+            
             if is_shifted:
                 bin_val = np.int64(round(
                     (precursor_mz - mz + shifted_offset) / tolerance
@@ -169,7 +196,7 @@ def create_index(spectra, is_shifted, tolerance, shifted_offset):
                 bin_val = np.int64(round(mz / tolerance))
 
             entries.append((bin_val, spec_idx, peak_idx, mz, intensity))
-
+            
     entries.sort()
     return entries
 
@@ -461,7 +488,7 @@ def calculate_exact_score_GNPS_multi_charge(query_spec, target_spec, TOLERANCE):
     return total, shared, shifted, num_matches
 
 @numba.njit
-def calculate_exact_score(query_spec, target_spec,TOLERANCE):
+def calculate_exact_score(query_spec, target_spec, TOLERANCE):
     """Calculate exact cosine similarity with tolerance checks"""
     # Access tuple elements by index
     q_mz = query_spec[0]  # Already sorted by mz
