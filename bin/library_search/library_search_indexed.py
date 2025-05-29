@@ -16,6 +16,14 @@ import numba
 # BUFFER_SIZE = 2000 
 
 def convert_to_mamba_format(file_list):
+    """Convert a list of spectra to a format suitable for Numba processing.
+
+    Args:
+        file_list (list): List of spectra, where each spectrum is a tuple of (mz_array, intensity_array, precursor_mz, charge)
+
+    Returns:
+        List: A Numba typed list containing tuples of (mz_array, intensity_array, precursor_mz, charge)
+    """
     numba_spectra = List()
     for spec in file_list:
         numba_spectra.append((
@@ -32,6 +40,20 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
                                     shifted_entries, tolerance,
                                     threshold, topk,
                                     library_min_matched_peaks):
+    """Compute all pairs of spectra from the query and library using shared and shifted peaks.
+    Args:
+        spectra (List): List of query spectra in Numba format.
+        library (List): List of library spectra in Numba format.
+        shared_entries (List): Shared peak entries for the library.
+        shifted_entries (List): Shifted peak entries for the library.
+        tolerance (float): Tolerance for matching peaks in daltons.
+        threshold (float): Threshold for minimum score to consider a match.
+        topk (int): Number of top matches to return.
+        library_min_matched_peaks (int): Minimum number of matched peaks required.
+    Returns:
+        List: A list of tuples, each containing the query index and a list of matched candidates.
+    """
+    
     results = List()
 
     n_library = len(library)
@@ -67,35 +89,22 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
                         upper_bounds[spec_idx] += intensity * entries[pos][4]
                         match_counts[spec_idx] += 1
                         pos += 1
-        # print("log", f"Upper bounds for query {query_idx}: {len(upper_bounds)}")
-        # Collect candidates using threshold parameter
-        # print("log", f"Collecting candidates for query {query_idx} where total matches >= {library_min_matched_peaks} and n_library = {n_library}... with threshold", threshold)
+
         candidates = List()
         for lib_idx in range(n_library):
-            # if query_idx == 41 and lib_idx == 22511:
-                # print("log", "Processing query 41, library index 22511...", upper_bounds[lib_idx], match_counts[lib_idx], upper_bounds[lib_idx] >= threshold, match_counts[lib_idx] >= library_min_matched_peaks)
             if (upper_bounds[lib_idx] >= threshold and
                     match_counts[lib_idx] >= library_min_matched_peaks):
                 candidates.append((lib_idx, upper_bounds[lib_idx]))
 
-        # print("log", f"Candidates for query {query_idx}: {len(candidates)}")
-        # for item in candidates:
-        #     print("log", f"Candidate: {item[0]}, Score: {item[1]}")
-        # Sort candidates by upper bound score
-        candidates.sort(key=lambda x: -x[1])
-        # print("log", f"sorted candidates for query {query_idx}: {len(candidates)}")
 
-        # Process top candidates for exact matching
+        candidates.sort(key=lambda x: -x[1])
         exact_matches = List()
         for lib_idx, _ in candidates:
-            # print("log", f"Processing exact match for candidate {lib_idx}...")
             target_spec = library[lib_idx]
             score, shared, shifted, num_matches = gnps_index.calculate_exact_score_GNPS(spectra[query_idx], target_spec, tolerance)
-            # print("log", f"Score for candidate {lib_idx}: {score}, Shared: {shared}, Shifted: {shifted}, Matches: {num_matches}")
             if score >= threshold:
                 exact_matches.append((lib_idx, score, shared, shifted, num_matches))
 
-        # Sort and store top results
         exact_matches.sort(key=lambda x: -x[1])
         size_val = min(topk, len(exact_matches))
         results.append((query_idx, exact_matches[:size_val]))
@@ -103,6 +112,19 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
     return results
 
 def convert_to_legacy_format(matches, spectra, library, topk, min_cosine, min_matched_peaks, qry_file_name):
+    """Convert matches to a DataFrame in legacy library search format.
+    
+    Args:
+        matches (List): List of tuples containing query index and matched candidates.
+        spectra (List): List of query spectra.
+        library (List): List of library spectra.
+        topk (int): Number of top matches to consider.
+        min_cosine (float): Minimum cosine score for a match.
+        min_matched_peaks (int): Minimum number of matched peaks for a match.
+        qry_file_name (str): Name of the query file.
+    Returns:
+        pd.DataFrame: DataFrame containing matches in legacy format.
+    """
     matches_buffer = []
     for query_idx, candidates in matches:
         q_spec = spectra[query_idx]
@@ -123,11 +145,13 @@ def convert_to_legacy_format(matches, spectra, library, topk, min_cosine, min_ma
             'Smiles': library[cand[0]].get('SMILES', ''),
         })
     
-    print("log", f"Converted {len(matches_buffer)} matches to legacy format.")
     
     results_df = pd.DataFrame(matches_buffer)
 
-    columns = ['#Scan#', 'SpectrumFile', 'Annotation', 'OrigAnnotation', 'Protein', 'dbIndex', 'numMods', 'matchOrientation', 'startMass', 'Charge', 'MQScore', 'p-value', 'isDecoy', 'StrictEnvelopeScore', 'UnstrictEvelopeScore', 'CompoundName', 'Organism', 'FileScanUniqueID', 'FDR', 'LibraryName', 'mzErrorPPM', 'LibMetaData', 'Smiles', 'Inchi', 'LibSearchSharedPeaks', 'Abundance', 'ParentMassDiff', 'SpecMZ', 'ExactMass', 'LibrarySpectrumID']
+    columns = ['#Scan#', 'SpectrumFile', 'Annotation', 'OrigAnnotation', 'Protein', 'dbIndex', 'numMods', 'matchOrientation',
+               'startMass', 'Charge', 'MQScore', 'p-value', 'isDecoy', 'StrictEnvelopeScore', 'UnstrictEvelopeScore', 'CompoundName', 
+               'Organism', 'FileScanUniqueID', 'FDR', 'LibraryName', 'mzErrorPPM', 'LibMetaData', 'Smiles', 'Inchi', 'LibSearchSharedPeaks',
+               'Abundance', 'ParentMassDiff', 'SpecMZ', 'ExactMass', 'LibrarySpectrumID']
     # for each column in columns, if it is not in results_df, add it with empty values
     for col in columns:
         if col not in results_df.columns:
@@ -254,12 +278,7 @@ def main():
     parser.add_argument('--full_relative_query_path', default=None, help='This is the original full relative path of the input file')
     
     args = parser.parse_args()
-    # print("topk", args.topk)
-    # print("spectrum_file:", args.spectrum_file)
-    
     spectrum_mgf = read_mgf(args.spectrum_file)
-    # print(spectrum_mgf[0].keys())
-
     library_mgf = read_mgf(args.library_file)
     
     def convert_single_spectrum_to_spectrum_list(data_dict):
@@ -268,16 +287,12 @@ def main():
         precursor_mz = float(data_dict.get('PEPMASS', 0.0))
         precursor_charge = data_dict.get('CHARGE', data_dict.get('charge', 1))
         precursor_charge = abs(int(precursor_charge))  # Ensure charge is positive
-        # print("log", f"Converted spectrum with {len(mz)} peaks, precursor_mz: {precursor_mz}, precursor_charge: {precursor_charge}")
-        # print("log", f"mz: {mz[:5]}, intensity: {intensity[:5]}")
         mz = np.asarray(mz)
         intensity = np.asarray(intensity)
         return gnps_index.filter_peaks_optimized(mz, intensity, precursor_mz, precursor_charge)
     
     spectrum_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in spectrum_mgf]
     library_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in library_mgf]
-    
-    print("log", f"Converted {len(spectrum_list)} spectra from query file and {len(library_list)} spectra from library file.")
     
     converted_spectrum_list, num_spectra = convert_to_mamba_format(spectrum_list)
     converted_library_list, num_library = convert_to_mamba_format(library_list)
@@ -291,12 +306,8 @@ def main():
                                               library_shifted_idx,
                                 args.fragment_tolerance, args.library_min_cosine, args.topk, args.library_min_matched_peaks)
 
-    print("log", f"Found {len(matches)} matches across {num_spectra} query spectra and {num_library} library spectra.")
-    # print(library_mgf[0].keys())
     results_df = convert_to_legacy_format(matches, spectrum_mgf, library_mgf, args.topk, args.library_min_cosine, args.library_min_matched_peaks, args.spectrum_file)
-    # sort results_df by MQScore
     results_df = results_df.sort_values(by='MQScore', ascending=False)
-    print("log", f"Converted results to DataFrame with {len(results_df)} rows.")
     
     results_df["SpectrumFile"] = results_df["SpectrumFile"].apply(lambda x: os.path.basename(x))
 
