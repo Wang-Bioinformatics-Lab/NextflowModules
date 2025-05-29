@@ -228,6 +228,7 @@ process librarygetGNPSAnnotations {
     path "library_summary.tsv"
     val topk
     val filtertostructures
+    val forceoffline
 
     output:
     path 'merged_results_with_gnps.tsv'
@@ -238,7 +239,8 @@ process librarygetGNPSAnnotations {
     merged_results_with_gnps.tsv \
     --librarysummary library_summary.tsv \
     --topk $topk \
-    --filtertostructures $filtertostructures
+    --filtertostructures $filtertostructures \
+    --forceoffline $forceoffline
     """
 }
 
@@ -263,7 +265,7 @@ process filtertop1Annotations {
 }
 
 process summaryLibrary {
-    publishDir params.publishDir, mode: 'copy'
+    //publishDir params.publishDir, mode: 'copy'
 
     cache 'lenient'
 
