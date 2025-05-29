@@ -10,7 +10,8 @@ from collections import defaultdict
 import gnps_index
 from numba.typed import List
 import numpy as np
-from pyteomics import mgf
+from pyteomics import mgf, mzml
+
 import numba
 
 # BUFFER_SIZE = 2000 
@@ -39,7 +40,7 @@ def convert_to_mamba_format(file_list):
 def cross_library_compute_all_pairs(spectra, library, shared_entries,
                                     shifted_entries, tolerance,
                                     threshold, topk,
-                                    library_min_matched_peaks):
+                                    library_min_matched_peaks, analog_search=True):
     """Compute all pairs of spectra from the query and library using shared and shifted peaks.
     Args:
         spectra (List): List of query spectra in Numba format.
@@ -50,6 +51,7 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
         threshold (float): Threshold for minimum score to consider a match.
         topk (int): Number of top matches to return.
         library_min_matched_peaks (int): Minimum number of matched peaks required.
+        analog_search (bool): Whether to perform analog search or not.
     Returns:
         List: A list of tuples, each containing the query index and a list of matched candidates.
     """
@@ -94,14 +96,17 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
         for lib_idx in range(n_library):
             if (upper_bounds[lib_idx] >= threshold and
                     match_counts[lib_idx] >= library_min_matched_peaks):
-                candidates.append((lib_idx, upper_bounds[lib_idx]))
+                if analog_search:
+                    candidates.append((lib_idx, upper_bounds[lib_idx]))
+                elif round(precursor_mz - library[lib_idx][2], 4) <= 2*tolerance:
+                    candidates.append((lib_idx, upper_bounds[lib_idx]))
 
 
         candidates.sort(key=lambda x: -x[1])
         exact_matches = List()
         for lib_idx, _ in candidates:
             target_spec = library[lib_idx]
-            score, shared, shifted, num_matches = gnps_index.calculate_exact_score_GNPS(spectra[query_idx], target_spec, tolerance)
+            score, shared, shifted, num_matches = gnps_index.calculate_exact_score_GNPS_multi_charge(spectra[query_idx], target_spec, tolerance)
             if score >= threshold:
                 exact_matches.append((lib_idx, score, shared, shifted, num_matches))
 
@@ -258,6 +263,96 @@ def read_mgf(mgf_path, buffer_size=8192):
         
     return result
 
+def read_mzml_spectrum(file_path, drop_ms1=True):
+    """Read a single spectrum from an mzML file.
+    Args:
+        file_path (str): Path to the mzML file.
+        drop_ms1 (bool): If True, MS1 spectra will be dropped.
+    Returns:
+        list: List of Spectrum objects containing the spectrum data.
+    """
+    result = []
+    with mzml.MzML(file_path) as reader:
+        for spectrum in reader:
+            ms_level = spectrum["ms level"]
+            scan = -1
+            index = int(spectrum["index"])
+            peaks = []
+
+            for i in range(len(spectrum["m/z array"])):
+                peaks.append([float(spectrum["m/z array"][i]), float(spectrum["intensity array"][i])])
+
+            # Determining scan
+            for id_split in spectrum["id"].split(" "):
+                if id_split.find("scan=") != -1:
+                    scan = int(id_split.replace("scan=", ""))
+                if "scanId=" in id_split:
+                    scan = int(id_split.replace("scanId=", ""))
+
+            if ms_level == 1 and not drop_ms1:
+                result.append({
+                    'filename': file_path,
+                    'SCANS': scan,
+                    'index': index,
+                    'PEAKS': peaks,
+                    'PEPMASS': 0,
+                    'precursor_intensity': 0,
+                    'CHARGE': 0,
+                    'ms_level': ms_level
+                })
+            elif ms_level == 2:
+                precursor_list = spectrum["precursorList"]["precursor"][0]
+                activation = precursor_list["activation"]
+                collision_energy = float(activation.get("collision energy", 0))
+
+                selected_ion_list = precursor_list["selectedIonList"]
+                precursor_mz = float(selected_ion_list["selectedIon"][0]["selected ion m/z"])
+                precursor_intensity = float(selected_ion_list["selectedIon"][0].get("peak intensity", 0))
+                precursor_charge = int(selected_ion_list["selectedIon"][0].get("charge state", 0))
+
+                fragmentation_method = "NO_FRAG"
+                totIonCurrent = float(spectrum["total ion current"])
+
+                try:
+                    for key in activation:
+                        if key == "beam-type collision-induced dissociation":
+                            fragmentation_method = "HCD"
+                except:
+                    fragmentation_method = "NO_FRAG"
+
+                result.append({
+                    'filename': file_path,
+                    'SCANS': scan,
+                    'index': index,
+                    'PEAKS': peaks,
+                    'PEPMASS': precursor_mz,
+                    'precursor_intensity': precursor_intensity,
+                    'CHARGE': precursor_charge,
+                    'ms_level': ms_level,
+                    'collision_energy': collision_energy,
+                    'fragmentation_method': fragmentation_method,
+                    'totIonCurrent': totIonCurrent
+                })
+    return result
+    
+
+def read_file(file_path):
+    """Read a file and return its contents based on the file type.
+    
+    Args:
+        file_path (str): Path to the file.
+    
+    Returns:
+        list: List of spectra read from the file.
+    """
+    extension = os.path.splitext(file_path)[1].lower()
+    if extension == '.mgf':
+        return read_mgf(file_path)
+    elif extension == '.mzml':
+        return read_mzml_spectrum(file_path)
+    else:
+        raise ValueError(f"Unsupported file format: {file_path}")
+
 def main():
     parser = argparse.ArgumentParser(description='Running library search parallel')
     parser.add_argument('spectrum_file', help='spectrum_file')
@@ -278,8 +373,8 @@ def main():
     parser.add_argument('--full_relative_query_path', default=None, help='This is the original full relative path of the input file')
     
     args = parser.parse_args()
-    spectrum_mgf = read_mgf(args.spectrum_file)
-    library_mgf = read_mgf(args.library_file)
+    spectrum_mgf = read_file(args.spectrum_file)
+    library_mgf = read_file(args.library_file)
     
     def convert_single_spectrum_to_spectrum_list(data_dict):
         mz = [float(x[0]) for x in data_dict['PEAKS']]
@@ -299,6 +394,12 @@ def main():
     
     library_shared_idx = gnps_index.create_index(converted_library_list, False, args.fragment_tolerance, gnps_index.SHIFTED_OFFSET)
     library_shifted_idx = gnps_index.create_index(converted_library_list, True, args.fragment_tolerance, gnps_index.SHIFTED_OFFSET)
+    
+    print("spectrum_list")
+    print("converted_spectrum_list length:", len(converted_spectrum_list))
+    print("converted_library_list length:", len(converted_library_list))
+    print("library_shared_idx length:", len(library_shared_idx))
+    print("library_shifted_idx length:", len(library_shifted_idx))
     
     matches = cross_library_compute_all_pairs(converted_spectrum_list,
                                               converted_library_list,
