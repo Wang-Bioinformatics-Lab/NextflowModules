@@ -9,6 +9,7 @@ dependencies:
   - numba
   - pymzml
   - pip:
+    - lxml # for mzml parsing in pymzml
     - xmltodict
     - requests
     - requests_cache

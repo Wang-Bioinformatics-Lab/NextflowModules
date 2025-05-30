@@ -62,7 +62,7 @@ def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_ch
     sorted_idx = np.argsort(mz_array)
     mz_sorted = mz_array[sorted_idx].astype(np.float32)
     int_sorted = intensity_array[sorted_idx].astype(np.float32)
-    # int_sorted = np.sqrt(int_sorted)
+    int_sorted = np.sqrt(int_sorted)
 
     # Apply sqrt transform and L2 normalization
     norm = np.linalg.norm(int_sorted)
