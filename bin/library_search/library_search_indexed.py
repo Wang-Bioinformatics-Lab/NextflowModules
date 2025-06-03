@@ -13,6 +13,7 @@ import numpy as np
 from pyteomics import mgf, mzml
 
 import numba
+import time
 
 # BUFFER_SIZE = 2000 
 
@@ -40,7 +41,7 @@ def convert_to_mamba_format(file_list):
 def cross_library_compute_all_pairs(spectra, library, shared_entries,
                                     shifted_entries, tolerance,
                                     threshold, topk,
-                                    library_min_matched_peaks, analog_search=True):
+                                    library_min_matched_peaks, analog_search=True, pm_tolerance=None):
     """Compute all pairs of spectra from the query and library using shared and shifted peaks.
     Args:
         spectra (List): List of query spectra in Numba format.
@@ -55,7 +56,8 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
     Returns:
         List: A list of tuples, each containing the query index and a list of matched candidates.
     """
-    
+    if pm_tolerance is None:
+        pm_tolerance = tolerance * 2
     results = List()
 
     n_library = len(library)
@@ -76,6 +78,7 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
             shared_bin = np.int64(round(mz / tolerance))
             shifted_bin = np.int64(round((precursor_mz - mz + gnps_index.SHIFTED_OFFSET) / tolerance))
 
+            # print("shared_bin", shared_bin, "shifted_bin", shifted_bin, "mz", mz, "precursor_mz", precursor_mz, "tolerance", tolerance)
             # Check both shared and shifted entries
             for entries, bin_val in [(shared_entries, shared_bin),
                                      (shifted_entries, shifted_bin)]:
@@ -83,8 +86,9 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
                     target_bin = bin_val + delta
                     start, end = gnps_index.find_bin_range(entries, target_bin)
                     pos = start
-                    while pos < end and entries[pos][1] <= query_idx:
-                        pos += 1
+                    # while pos < end: and entries[pos][1] <= query_idx: I think this was to divide the time by half when doing within library 
+                    #     pos += 1
+                    # print("Processing bin", target_bin, "from", start, "to", end, "with pos", pos)
                     # Find matches in this bin
                     while pos < end and entries[pos][0] == target_bin:
                         spec_idx = entries[pos][1]
@@ -94,19 +98,25 @@ def cross_library_compute_all_pairs(spectra, library, shared_entries,
 
         candidates = List()
         for lib_idx in range(n_library):
+            # print(f"Processing library spectrum {lib_idx + 1}/{n_library}...", match_counts[lib_idx], upper_bounds[lib_idx])
+            # if abs(library[lib_idx][2]-392.185) < 0.01:
+            #     print("the true response:", lib_idx, upper_bounds[lib_idx], match_counts[lib_idx], library[lib_idx][2], precursor_mz, tolerance)
             if (upper_bounds[lib_idx] >= threshold and
                     match_counts[lib_idx] >= library_min_matched_peaks):
                 if analog_search:
                     candidates.append((lib_idx, upper_bounds[lib_idx]))
-                elif round(precursor_mz - library[lib_idx][2], 4) <= 2*tolerance:
+                elif abs(precursor_mz - library[lib_idx][2]) <= pm_tolerance:
                     candidates.append((lib_idx, upper_bounds[lib_idx]))
+                # else:
+                #     print(f"Skipping library spectrum {lib_idx} due to precursor mass difference: {abs(precursor_mz - library[lib_idx][2])} > {2*tolerance}", precursor_mz, library[lib_idx][2], tolerance)
 
-
+        # print(f"Found {len(candidates)} candidates for query spectrum {query_idx + 1}/{n_spectra}...")
         candidates.sort(key=lambda x: -x[1])
         exact_matches = List()
         for lib_idx, _ in candidates:
             target_spec = library[lib_idx]
             score, shared, shifted, num_matches = gnps_index.calculate_exact_score_GNPS_multi_charge(spectra[query_idx], target_spec, tolerance)
+            # print("score", score)
             if score >= threshold:
                 exact_matches.append((lib_idx, score, shared, shifted, num_matches))
 
@@ -134,20 +144,28 @@ def convert_to_legacy_format(matches, spectra, library, topk, min_cosine, min_ma
     for query_idx, candidates in matches:
         q_spec = spectra[query_idx]
         for cand in candidates:
+            possible_columns_for_name = ['NAME', 'COMPOUND_NAME', 'COMPOUNDNAME']
+            name = ''
+            for col in possible_columns_for_name:
+                if col in library[cand[0]]:
+                    name = library[cand[0]][col]
+                    break
             matches_buffer.append({
             '#Scan#': q_spec["SCANS"],
             'SpectrumFile': qry_file_name,
             'Charge': library[cand[0]].get('CHARGE', 1),
-            'MQScore': round(cand[1], 4),
+            'MQScore': round(cand[1], 6),
             # 'p-value': qry_spec.rt,  # RT value # this needs to be fixed in the future
             # 'UnstrictEvelopeScore': round(qry_spec.tic),  # TIC value # this needs to be fixed in the future
             'FileScanUniqueID': f'{qry_file_name}_{q_spec["SCANS"]}',
-            'mzErrorPPM': round((q_spec["PEPMASS"] - library[cand[0]]["PEPMASS"]) / library[cand[0]]["PEPMASS"] * 1e6, 4),
+            'mzErrorPPM': abs((q_spec["PEPMASS"] - library[cand[0]]["PEPMASS"]) / library[cand[0]]["PEPMASS"] * 1e6),
             'LibSearchSharedPeaks': cand[4],
-            'ParentMassDiff': round(q_spec["PEPMASS"] - library[cand[0]]["PEPMASS"], 4),
+            'ParentMassDiff': abs(q_spec["PEPMASS"] - library[cand[0]]["PEPMASS"]),
             'SpecMZ': q_spec["PEPMASS"],
             'LibrarySpectrumID': library[cand[0]]['SPECTRUMID'] if library[cand[0]]['SPECTRUMID'] != '' else f'scans_{library[cand[0]]["SCANS"]}',
             'Smiles': library[cand[0]].get('SMILES', ''),
+            'CompoundName': name,
+            'Organism': library[cand[0]].get('ORGANISM', library[cand[0]].get('LIBRARY_NAME', '')),
         })
     
     
@@ -238,6 +256,7 @@ def read_mgf_spectrum(file_obj):
                 # If no '=' found, treat as peak data
                 try:
                     mz, intensity = line.split()
+                    # print("mz", mz, "float(mz), ", float(mz))
                     spectrum['PEAKS'].append((float(mz), float(intensity)))
                 except:
                     continue
@@ -373,8 +392,13 @@ def main():
     parser.add_argument('--full_relative_query_path', default=None, help='This is the original full relative path of the input file')
     
     args = parser.parse_args()
+    print("starting to read files", args.spectrum_file, args.library_file)
+    start_time = time.time()
     spectrum_mgf = read_file(args.spectrum_file)
+    # print(len(spectrum_mgf))
     library_mgf = read_file(args.library_file)
+    print("Reading the files took:", time.time() - start_time, "seconds")
+    start_time = time.time()
     
     def convert_single_spectrum_to_spectrum_list(data_dict):
         mz = [float(x[0]) for x in data_dict['PEAKS']]
@@ -386,31 +410,49 @@ def main():
         intensity = np.asarray(intensity)
         return gnps_index.filter_peaks_optimized(mz, intensity, precursor_mz, precursor_charge)
     
+
     spectrum_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in spectrum_mgf]
     library_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in library_mgf]
+    
+    print("Converting spectra to spectrum list format and cleaning took:", time.time() - start_time, "seconds")
+    start_time = time.time()
     
     converted_spectrum_list, num_spectra = convert_to_mamba_format(spectrum_list)
     converted_library_list, num_library = convert_to_mamba_format(library_list)
     
+    print("Converting spectra to mamba format took:", time.time() - start_time, "seconds")
+    start_time = time.time()
+    
     library_shared_idx = gnps_index.create_index(converted_library_list, False, args.fragment_tolerance, gnps_index.SHIFTED_OFFSET)
     library_shifted_idx = gnps_index.create_index(converted_library_list, True, args.fragment_tolerance, gnps_index.SHIFTED_OFFSET)
     
-    print("spectrum_list")
-    print("converted_spectrum_list length:", len(converted_spectrum_list))
-    print("converted_library_list length:", len(converted_library_list))
-    print("library_shared_idx length:", len(library_shared_idx))
-    print("library_shifted_idx length:", len(library_shifted_idx))
+    # print("library_shared_idx", library_shared_idx)
+    
+    print("Creating library index took:", time.time() - start_time, "seconds")
+    # print("spectra1 is", converted_spectrum_list[0])
+    # print("library1 is", converted_library_list[0])
+    start_time = time.time()
+    
+    # print("analog search is", args.analog_search == 1)
     
     matches = cross_library_compute_all_pairs(converted_spectrum_list,
                                               converted_library_list,
                                               library_shared_idx,
                                               library_shifted_idx,
-                                args.fragment_tolerance, args.library_min_cosine, args.topk, args.library_min_matched_peaks)
+                                args.fragment_tolerance, args.library_min_cosine, 
+                                args.topk, args.library_min_matched_peaks,
+                                analog_search=(args.analog_search == 1), 
+                                pm_tolerance=args.pm_tolerance)
 
+    print("Cross-library computation took:", time.time() - start_time, "seconds")
+    start_time = time.time()
     results_df = convert_to_legacy_format(matches, spectrum_mgf, library_mgf, args.topk, args.library_min_cosine, args.library_min_matched_peaks, args.spectrum_file)
     results_df = results_df.sort_values(by='MQScore', ascending=False)
     
     results_df["SpectrumFile"] = results_df["SpectrumFile"].apply(lambda x: os.path.basename(x))
+
+    print("Converting matches to legacy format took:", time.time() - start_time, "seconds")
+    # start_time = time.time()
 
     if not os.path.exists(args.result_folder):
         os.makedirs(args.result_folder)

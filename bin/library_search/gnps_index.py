@@ -1,6 +1,6 @@
 import numba
 import numpy as np
-from numba.typed import List
+from numba.typed import List as ListNumba
 import os
 import concurrent.futures
 import pymzml
@@ -21,32 +21,187 @@ SpectrumTuple = numba.types.Tuple([
     numba.int32  # precursor_charge
 ])
 
-# def normalize_peaks(self, change_self = True):
-#     """l2 Normalize the intensity of the Spectrum object.
+
+class FenwickTree:
+    def __init__(self, size):
+        self.size = size
+        self.tree = np.zeros(size + 1, dtype=np.float32)
+
+    def add(self, position):
+        # position = self.size - position - 1
+        while position < self.size:
+            self.tree[position] += 1
+            position = position | (position + 1)
+
+    def query(self, position):
+        sum = 0
+        # position = self.size - position - 1
+        while (position >= 0):
+            sum += self.tree[position]
+            position = (position & (position + 1)) - 1
+        
+        return sum
+
+def filter_window_peaks_optimized(
+    mz_array: np.ndarray,
+    intensity_array: np.ndarray,
+    window_size: float = 50,
+    peaks_to_keep_in_window: int = 6
+) -> (np.ndarray, np.ndarray):
+    """
+    For each peak, calculate the number of peaks within its m/z window 
+    (current_mz - window_size, current_mz + window_size) 
+    that have larger intensity. Keep only the peaks that have less 
+    than `peaks_to_keep_in_window` such peaks in their window.
+    Assumes the input mz_array is sorted.
+    """
     
-#     Parameters
-#     ----------
-#     change_self : bool, default is True
-#         If True, the intensity of the Spectrum object will be normalized in place.
-#         If False, a new Spectrum object with the normalized intensity will be returned.
+    if len(mz_array) == 0:
+        return mz_array, intensity_array
+
+    n = len(mz_array)
     
-#     Returns
-#     -------
-#     None
-#         If change_self is True, the intensity of the Spectrum object will be normalized in place.
-#     Spectrum
-#         A new Spectrum object with the normalized intensity.
-#     """
+    rev_sorted_intensities = np.argsort(-intensity_array)
+    fenwick_tree = FenwickTree(n)
+    res = []
     
-#     l2_norm = np.linalg.norm(self.intensity)
-#     new_intensity = [intensity / l2_norm for intensity in self.intensity]
+    for i in range(n):
+        current_mz = mz_array[rev_sorted_intensities[i]]
+        current_intensity = intensity_array[rev_sorted_intensities[i]]
+        lower_mz_bound = current_mz - window_size
+        start_idx = np.searchsorted(mz_array, lower_mz_bound, side='left')
+        left = fenwick_tree.query(rev_sorted_intensities[i]) - fenwick_tree.query(start_idx)
+        end_idx = np.searchsorted(mz_array, current_mz + window_size, side='right')
+        right = fenwick_tree.query(end_idx) - fenwick_tree.query(rev_sorted_intensities[i])
+        
+        # print(f"Peak sorted {i}, at index {rev_sorted_intensities[i]}:  mz={current_mz}, intensity={current_intensity}, left={left}, right={right}, total={left + right}, end_index={end_idx}")
+        
+        if left + right <= peaks_to_keep_in_window:
+            res.append((current_mz, current_intensity))
+        
+        # Update Fenwick tree with the current peak
+        fenwick_tree.add(rev_sorted_intensities[i])
+
+
+    mz_array, intensity_array = zip(*res)
+    # sort the results by m/z
+    index = np.argsort(mz_array)
+    mz_array = np.array(mz_array, dtype=np.float32)[index]
+    intensity_array = np.array(intensity_array, dtype=np.float32)[index]
+    return np.array(mz_array, dtype=np.float32), np.array(intensity_array, dtype=np.float32)
+
+
+def smart_filter_window_peaks_optimized(
+    mz_array: np.ndarray,
+    intensity_array: np.ndarray,
+    window_size: float = 50,
+    peaks_to_keep_in_window: int = 6
+) -> (np.ndarray, np.ndarray):
+    """
+    For each peak, calculate the number of peaks within its m/z window 
+    (current_mz - window_size, current_mz + window_size) 
+    that have larger intensity. Keep only the peaks that have less 
+    than `peaks_to_keep_in_window` such peaks in their window.
+    Assumes the input mz_array is sorted.
+    """
     
-#     if change_self:
-#         self.intensity = new_intensity
-#     else:
-#         new_spectrum = self.copy()
-#         new_spectrum.intensity = new_intensity
-#         return new_spectrum
+    if len(mz_array) == 0:
+        return mz_array, intensity_array
+    
+    mz_array, intensity_array = filter_window_peaks(
+        mz_array, intensity_array, window_size=window_size//4, peaks_to_keep_in_window=peaks_to_keep_in_window
+    )
+
+    n = len(mz_array)
+    # Create a boolean mask to mark peaks to keep
+    keep_mask = np.zeros(n, dtype=bool)
+
+    for i in range(n):
+        current_mz = mz_array[i]
+        current_intensity = intensity_array[i]
+
+        count_larger_in_window = np.sum(
+            (mz_array > (current_mz - window_size)) &
+            (mz_array < (current_mz + window_size)) &
+            (intensity_array > current_intensity)
+        )
+
+        if count_larger_in_window < peaks_to_keep_in_window:
+            keep_mask[i] = True # Mark this peak to be kept
+
+    return mz_array[keep_mask], intensity_array[keep_mask]
+
+def filter_window_peaks(
+    mz_array: np.ndarray,
+    intensity_array: np.ndarray,
+    window_size: float = 50,
+    peaks_to_keep_in_window: int = 6
+) -> (np.ndarray, np.ndarray):
+    """
+    Sliding‐window peak filter.  For each peak i, consider all peaks j
+    with |mz[j] - mz[i]| <= window_size.  Keep peak i if its intensity
+    is among the top `peaks_to_keep_in_window` in that local window.
+
+    Returns filtered (mz, intensity), sorted by mz ascending.
+    """
+    if len(mz_array) == 0:
+        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+
+    # 1) find the maximum mass to size our buckets
+    max_mass = np.max(mz_array)
+
+    # 2) create buckets
+    num_buckets = int(int(max_mass) // window_size) + 1
+    buckets = [list() for _ in range(num_buckets)]
+
+    # 3) assign each peak to its bucket
+    for mass, intensity in zip(mz_array, intensity_array):
+        idx = int(int(mass) // window_size)
+        buckets[idx].append((mass, intensity))
+
+    # 4) sort each bucket by intensity descending
+    for bucket in buckets:
+        bucket.sort(key=lambda peak: peak[1], reverse=True)
+
+    # 5) collect up to max_peaks per bucket
+    filtered = list()
+    for bucket in buckets:
+        if len(bucket) > peaks_to_keep_in_window:
+            bucket = bucket[:peaks_to_keep_in_window]
+        filtered.extend(bucket)
+
+    # 6) sort the final list by mass ascending
+    filtered.sort(key=lambda peak: peak[0])
+    # 7) convert to numpy arrays
+    mz_filtered = np.array([peak[0] for peak in filtered], dtype=np.float32)
+    int_filtered = np.array([peak[1] for peak in filtered], dtype=np.float32)
+    return mz_filtered, int_filtered
+
+
+def filter_around_precursor(
+    mz_array: np.ndarray,
+    intensity_array: np.ndarray,
+    precursor_mz: float,
+    window_size: float = 15.0
+    ) -> (np.ndarray, np.ndarray):
+    """
+    Filter peaks around the precursor m/z value.
+    Peaks within 50 Da of the precursor m/z are kept.
+    Returns filtered (mz, intensity), sorted by mz ascending.
+    """
+    if len(mz_array) == 0:
+        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+    
+    # Create a mask for peaks within the window size of the precursor m/z
+    mask = np.abs(mz_array - precursor_mz) > window_size
+    
+    mz_filtered = mz_array[mask]
+    int_filtered = intensity_array[mask]
+    if len(mz_filtered) == 0:
+        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+    else:
+        return mz_filtered.astype(np.float32), int_filtered.astype(np.float32)
+        
 
 def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_charge):
     """Only apply sqrt transform and L2 normalization without filtering"""
@@ -63,6 +218,20 @@ def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_ch
     mz_sorted = mz_array[sorted_idx].astype(np.float32)
     int_sorted = intensity_array[sorted_idx].astype(np.float32)
     int_sorted = np.sqrt(int_sorted)
+    
+    # top_k_indices = np.argsort(int_sorted)[::-1][:100] # TODO: Fix this to a better filtering strategy
+    # int_sorted = np.array([int_sorted[index] for index in top_k_indices])
+    # mz_sorted = np.array([mz_sorted[index] for index in top_k_indices])
+
+
+    mz_sorted, int_sorted = smart_filter_window_peaks_optimized(
+        mz_sorted, int_sorted, window_size=50.0, peaks_to_keep_in_window=6
+    )
+    
+    # Filter around precursor m/z
+    mz_sorted, int_sorted = filter_around_precursor(
+        mz_sorted, int_sorted, precursor_mz, window_size=15.0
+    )
 
     # Apply sqrt transform and L2 normalization
     norm = np.linalg.norm(int_sorted)
@@ -178,7 +347,7 @@ def parse_files_in_parallel(file_paths, threads=1):
 @numba.njit
 def create_index(spectra, is_shifted, tolerance, shifted_offset):
     """Create index structure for fast lookups"""
-    entries = List()
+    entries = ListNumba()
     for spec_idx in range(len(spectra)):
         spec = spectra[spec_idx]
         mz_arr = spec[0]
@@ -200,6 +369,28 @@ def create_index(spectra, is_shifted, tolerance, shifted_offset):
     entries.sort()
     return entries
 
+
+# @numba.njit
+# def find_bin_range(entries, target_bin):
+#     """Binary search for bin ranges"""
+#     left = 0
+#     right = len(entries)
+#     while left < right - 1:
+#         mid = (left + right) // 2
+#         if entries[mid][0] <= target_bin:
+#             left = mid
+#         else:
+#             right = mid
+#     start = left
+
+#     right = len(entries)
+#     while left < right - 1:
+#         mid = (left + right) // 2
+#         if entries[mid][0] <= target_bin:
+#             left = mid
+#         else:
+#             right = mid
+#     return start, right
 
 @numba.njit
 def find_bin_range(entries, target_bin):
@@ -238,7 +429,7 @@ def decode_ij(k, N):
 
 @numba.njit
 def compute_all_pairs(spectra, shared_entries, shifted_entries, tolerance, threshold, scoring_func, query_start, query_end):
-    results = List()
+    results = ListNumba()
     n_spectra = len(spectra)
 
     for query_idx in range(query_start, query_end+1):
@@ -273,7 +464,7 @@ def compute_all_pairs(spectra, shared_entries, shifted_entries, tolerance, thres
                         pos += 1
 
         # Collect candidates using threshold parameter
-        candidates = List()
+        candidates = ListNumba()
         for spec_idx in range(query_idx + 1, n_spectra):
             if (upper_bounds[spec_idx] >= threshold and
                     match_counts[spec_idx] >= MINMATCHES):
@@ -283,7 +474,7 @@ def compute_all_pairs(spectra, shared_entries, shifted_entries, tolerance, thres
         candidates.sort(key=lambda x: -x[1])
 
         # Process top candidates for exact matching
-        exact_matches = List()
+        exact_matches = ListNumba()
         for spec_idx, _ in candidates[:TOPPRODUCTS * 2]:
             target_spec = spectra[spec_idx]
             score, shared, shifted, num_matches = scoring_func(spectra[query_idx], target_spec,tolerance)
@@ -639,7 +830,7 @@ def main():
     print(f"Parsed {len(spectra_list)} spectra")
 
     # Convert to numba-compatible format
-    numba_spectra = List()
+    numba_spectra = ListNumba()
     for spec in spectra_list:
         numba_spectra.append((
             spec[0].astype(np.float32),
