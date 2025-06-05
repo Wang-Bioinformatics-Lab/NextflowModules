@@ -9,14 +9,13 @@ import time
 import argparse
 
 SHIFTED_OFFSET = 6000
-TOPK = 10
 MINMATCHES = 6
 TOPPRODUCTS = 30000
 ADJACENT_BINS = np.array([-1, 0, 1], dtype=np.int64)
 
 SpectrumTuple = numba.types.Tuple([
-    numba.float32[:],  # mz
-    numba.float32[:],  # intensity
+    numba.float64[:],  # mz
+    numba.float64[:],  # intensity
     numba.float32,  # precursor_mz
     numba.int32  # precursor_charge
 ])
@@ -25,7 +24,7 @@ SpectrumTuple = numba.types.Tuple([
 class FenwickTree:
     def __init__(self, size):
         self.size = size
-        self.tree = np.zeros(size + 1, dtype=np.float32)
+        self.tree = np.zeros(size + 1, dtype=np.float64)
 
     def add(self, position):
         # position = self.size - position - 1
@@ -74,8 +73,6 @@ def filter_window_peaks_optimized(
         end_idx = np.searchsorted(mz_array, current_mz + window_size, side='right')
         right = fenwick_tree.query(end_idx) - fenwick_tree.query(rev_sorted_intensities[i])
         
-        # print(f"Peak sorted {i}, at index {rev_sorted_intensities[i]}:  mz={current_mz}, intensity={current_intensity}, left={left}, right={right}, total={left + right}, end_index={end_idx}")
-        
         if left + right <= peaks_to_keep_in_window:
             res.append((current_mz, current_intensity))
         
@@ -86,9 +83,9 @@ def filter_window_peaks_optimized(
     mz_array, intensity_array = zip(*res)
     # sort the results by m/z
     index = np.argsort(mz_array)
-    mz_array = np.array(mz_array, dtype=np.float32)[index]
-    intensity_array = np.array(intensity_array, dtype=np.float32)[index]
-    return np.array(mz_array, dtype=np.float32), np.array(intensity_array, dtype=np.float32)
+    mz_array = np.array(mz_array, dtype=np.float64)[index]
+    intensity_array = np.array(intensity_array, dtype=np.float64)[index]
+    return np.array(mz_array, dtype=np.float64), np.array(intensity_array, dtype=np.float64)
 
 
 def smart_filter_window_peaks_optimized(
@@ -108,6 +105,7 @@ def smart_filter_window_peaks_optimized(
     if len(mz_array) == 0:
         return mz_array, intensity_array
     
+    #---------------- this is to improve speed, it will cause change in result compared to legacy GNPS ----------------
     mz_array, intensity_array = filter_window_peaks(
         mz_array, intensity_array, window_size=window_size//4, peaks_to_keep_in_window=peaks_to_keep_in_window
     )
@@ -120,11 +118,22 @@ def smart_filter_window_peaks_optimized(
         current_mz = mz_array[i]
         current_intensity = intensity_array[i]
 
-        count_larger_in_window = np.sum(
-            (mz_array > (current_mz - window_size)) &
+        #---------------correct way to do it:----------------
+        # count_larger_in_window = np.sum(
+        #     (mz_array > (current_mz - window_size)) &
+        #     (mz_array < (current_mz + window_size)) &
+        #     (intensity_array > current_intensity)
+        # )
+        
+        #----------------gnps legacy way:----------------
+        mask = ((mz_array > (current_mz - window_size)) &
             (mz_array < (current_mz + window_size)) &
-            (intensity_array > current_intensity)
-        )
+            (intensity_array > current_intensity))
+        #------------------------------------------------
+        
+        # count unique values in the intensity array:
+        count_larger_in_window = len(np.unique(intensity_array[mask]))
+        
 
         if count_larger_in_window < peaks_to_keep_in_window:
             keep_mask[i] = True # Mark this peak to be kept
@@ -145,7 +154,7 @@ def filter_window_peaks(
     Returns filtered (mz, intensity), sorted by mz ascending.
     """
     if len(mz_array) == 0:
-        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
 
     # 1) find the maximum mass to size our buckets
     max_mass = np.max(mz_array)
@@ -173,16 +182,16 @@ def filter_window_peaks(
     # 6) sort the final list by mass ascending
     filtered.sort(key=lambda peak: peak[0])
     # 7) convert to numpy arrays
-    mz_filtered = np.array([peak[0] for peak in filtered], dtype=np.float32)
-    int_filtered = np.array([peak[1] for peak in filtered], dtype=np.float32)
+    mz_filtered = np.array([peak[0] for peak in filtered], dtype=np.float64)
+    int_filtered = np.array([peak[1] for peak in filtered], dtype=np.float64)
     return mz_filtered, int_filtered
 
 
 def filter_around_precursor(
     mz_array: np.ndarray,
     intensity_array: np.ndarray,
-    precursor_mz: float,
-    window_size: float = 15.0
+    precursor_mz,
+    window_size = 17.0
     ) -> (np.ndarray, np.ndarray):
     """
     Filter peaks around the precursor m/z value.
@@ -190,55 +199,52 @@ def filter_around_precursor(
     Returns filtered (mz, intensity), sorted by mz ascending.
     """
     if len(mz_array) == 0:
-        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
     
     # Create a mask for peaks within the window size of the precursor m/z
-    mask = np.abs(mz_array - precursor_mz) > window_size
+    mask = np.abs(mz_array - precursor_mz) >= window_size
     
     mz_filtered = mz_array[mask]
     int_filtered = intensity_array[mask]
     if len(mz_filtered) == 0:
-        return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+        return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
     else:
-        return mz_filtered.astype(np.float32), int_filtered.astype(np.float32)
+        return mz_filtered.astype(np.float64), int_filtered.astype(np.float64)
         
 
 def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_charge):
     """Only apply sqrt transform and L2 normalization without filtering"""
     if len(mz_array) == 0:
         return (
-            np.array([], dtype=np.float32),
-            np.array([], dtype=np.float32),
+            np.array([], dtype=np.float64),
+            np.array([], dtype=np.float64),
             precursor_mz,
             precursor_charge
         )
 
     # Sort by m/z first
     sorted_idx = np.argsort(mz_array)
-    mz_sorted = mz_array[sorted_idx].astype(np.float32)
-    int_sorted = intensity_array[sorted_idx].astype(np.float32)
-    int_sorted = np.sqrt(int_sorted)
+    mz_sorted = mz_array[sorted_idx].astype(np.float64)
+    int_sorted = intensity_array[sorted_idx].astype(np.float64)
     
-    # top_k_indices = np.argsort(int_sorted)[::-1][:100] # TODO: Fix this to a better filtering strategy
-    # int_sorted = np.array([int_sorted[index] for index in top_k_indices])
-    # mz_sorted = np.array([mz_sorted[index] for index in top_k_indices])
 
-
+    # Filter around precursor m/z
+    mz_sorted, int_sorted = filter_around_precursor(
+        mz_sorted, int_sorted, precursor_mz, window_size=17.0
+    )
+    
     mz_sorted, int_sorted = smart_filter_window_peaks_optimized(
         mz_sorted, int_sorted, window_size=50.0, peaks_to_keep_in_window=6
     )
     
-    # Filter around precursor m/z
-    mz_sorted, int_sorted = filter_around_precursor(
-        mz_sorted, int_sorted, precursor_mz, window_size=15.0
-    )
 
+    int_sorted = np.sqrt(int_sorted)
     # Apply sqrt transform and L2 normalization
     norm = np.linalg.norm(int_sorted)
     if norm > 0:
         int_sorted /= norm
 
-    return (mz_sorted, int_sorted, np.float32(precursor_mz), np.int32(precursor_charge))
+    return (mz_sorted, int_sorted, np.float32(precursor_mz), np.int32(precursor_charge)) # precursor mass is converted to float 32 to match legacy GNPS result.
 
 def parse_mgf_file(path):
     results=[]
@@ -261,8 +267,8 @@ def parse_mgf_file(path):
                     else:
                         charge_val=1
                     # Always create mz and intensity arrays, even if empty
-                    mz_arr = np.array(current["mz"], dtype=np.float32)
-                    in_arr = np.array(current["int"], dtype=np.float32)
+                    mz_arr = np.array(current["mz"], dtype=np.float64)
+                    in_arr = np.array(current["int"], dtype=np.float64)
                     filtered = filter_peaks_optimized(mz_arr, in_arr, pepmass_val, charge_val)
                     # Append to results regardless of mz/int being empty
                     results.append(filtered)
@@ -296,8 +302,8 @@ def parse_mzml_file(path):
         if spec.ms_level==2:
             if not spec.selected_precursors:
                 continue
-            mz_arr=np.array(spec.mz,dtype=np.float32)
-            in_arr=np.array(spec.i,dtype=np.float32)
+            mz_arr=np.array(spec.mz,dtype=np.float64)
+            in_arr=np.array(spec.i,dtype=np.float64)
             precursor_mz=float(spec.selected_precursors[0]['mz'])
             precursor_charge=spec.selected_precursors[0].get('charge',1)
             if not isinstance(precursor_charge,int):
@@ -434,7 +440,7 @@ def compute_all_pairs(spectra, shared_entries, shifted_entries, tolerance, thres
 
     for query_idx in range(query_start, query_end+1):
         query_spec = spectra[query_idx]
-        upper_bounds = np.zeros(n_spectra, dtype=np.float32)
+        upper_bounds = np.zeros(n_spectra, dtype=np.float64)
         match_counts = np.zeros(n_spectra, dtype=np.int32)
 
         # Process both shared and shifted peaks
@@ -506,7 +512,7 @@ def calculate_exact_score_GNPS(query_spec, target_spec, TOLERANCE):
 
     # Pre-allocate arrays for matches (adjust size as needed)
     max_matches = len(q_mz) * 2  # Estimate maximum possible matches
-    scores_arr = np.zeros(max_matches, dtype=np.float32)
+    scores_arr = np.zeros(max_matches, dtype=np.float64)
     idx_q = np.zeros(max_matches, dtype=np.int32)
     idx_t = np.zeros(max_matches, dtype=np.int32)
     match_count = 0
@@ -609,7 +615,7 @@ def calculate_exact_score_GNPS_multi_charge(query_spec, target_spec, TOLERANCE):
 
     # Pre-allocate arrays for matches
     max_matches = len(q_mz) * num_shifts * 10  # Estimate, adjust as needed
-    scores_arr = np.zeros(max_matches, dtype=np.float32)
+    scores_arr = np.zeros(max_matches, dtype=np.float64)
     idx_q = np.zeros(max_matches, dtype=np.int32)
     idx_t = np.zeros(max_matches, dtype=np.int32)
     is_shifted = np.zeros(max_matches, dtype=np.bool_)
@@ -833,9 +839,9 @@ def main():
     numba_spectra = ListNumba()
     for spec in spectra_list:
         numba_spectra.append((
-            spec[0].astype(np.float32),
-            spec[1].astype(np.float32),
-            np.float32(spec[2]),
+            spec[0].astype(np.float64),
+            spec[1].astype(np.float64),
+            np.float64(spec[2]),
             np.int32(spec[3])
         ))
     n_spectra = len(numba_spectra)
