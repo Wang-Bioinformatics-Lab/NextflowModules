@@ -380,6 +380,8 @@ def main():
     parser.add_argument('--topk', default=1, help='topk', type=int)
     parser.add_argument('--analog_search', default=0, help='Turn on analog search, 0 or 1', type=int)
     parser.add_argument('--threads', default=1, type=int, help='Number of threads to use for parallel processing')
+    parser.add_argument('--filter_precursor', default=1, type=int, help='Filter precursor peaks (1) or not (0)')
+    parser.add_argument('--filter_window', default=1, type=int, help='Filter peaks in a window (1) or not (0)')
 
     # This is good for bookkeeping in GNPS2 if you need the full path
     parser.add_argument('--full_relative_query_path', default=None, help='This is the original full relative path of the input file')
@@ -401,12 +403,13 @@ def main():
         precursor_charge = abs(int(precursor_charge))  # Ensure charge is positive
         mz = np.asarray(mz)
         intensity = np.asarray(intensity)
-        return gnps_index.filter_peaks_optimized(mz, intensity, precursor_mz, precursor_charge)
-    
+        return gnps_index.filter_peaks_optimized(mz, intensity, precursor_mz, precursor_charge,
+                                                 filter_precursor=args.filter_precursor == 1,
+                                                 filter_window= args.filter_window == 1)
 
     spectrum_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in spectrum_mgf]
     library_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in library_mgf]
-    
+
     # print("Converting spectra to spectrum list format and cleaning took:", time.time() - start_time, "seconds")
     # start_time = time.time()
     

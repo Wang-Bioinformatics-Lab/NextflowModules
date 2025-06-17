@@ -212,7 +212,9 @@ def filter_around_precursor(
         return mz_filtered.astype(np.float64), int_filtered.astype(np.float64)
         
 
-def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_charge):
+def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_charge,
+                           filter_precursor=True, filter_window=True, filter_precursor_radius=17.0,
+                           filter_window_size=50.0, peaks_to_keep_in_window=6):
     """Only apply sqrt transform and L2 normalization without filtering"""
     if len(mz_array) == 0:
         return (
@@ -227,15 +229,18 @@ def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_ch
     mz_sorted = mz_array[sorted_idx].astype(np.float64)
     int_sorted = intensity_array[sorted_idx].astype(np.float64)
     
-
-    # Filter around precursor m/z
-    mz_sorted, int_sorted = filter_around_precursor(
-        mz_sorted, int_sorted, precursor_mz, window_size=17.0
-    )
+    if filter_precursor:
+        # Filter around precursor m/z
+        mz_sorted, int_sorted = filter_around_precursor(
+            mz_sorted, int_sorted, precursor_mz, window_size=filter_precursor_radius
+        )
     
-    mz_sorted, int_sorted = smart_filter_window_peaks_optimized(
-        mz_sorted, int_sorted, window_size=50.0, peaks_to_keep_in_window=6
-    )
+    if filter_window:
+        mz_sorted, int_sorted = smart_filter_window_peaks_optimized(
+            mz_sorted, int_sorted,
+            window_size=filter_window_size,
+            peaks_to_keep_in_window=peaks_to_keep_in_window
+        )
     
 
     int_sorted = np.sqrt(int_sorted)
@@ -246,7 +251,9 @@ def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_ch
 
     return (mz_sorted, int_sorted, np.float32(precursor_mz), np.int32(precursor_charge)) # precursor mass is converted to float 32 to match legacy GNPS result.
 
-def parse_mgf_file(path):
+def parse_mgf_file(path, filter_precursor=True, filter_window=True,
+                     filter_precursor_radius=17.0, filter_window_size=50.0,
+                     peaks_to_keep_in_window=6):
     results=[]
     with open(path,'r') as f:
         in_ions=False
@@ -269,7 +276,12 @@ def parse_mgf_file(path):
                     # Always create mz and intensity arrays, even if empty
                     mz_arr = np.array(current["mz"], dtype=np.float64)
                     in_arr = np.array(current["int"], dtype=np.float64)
-                    filtered = filter_peaks_optimized(mz_arr, in_arr, pepmass_val, charge_val)
+                    filtered = filter_peaks_optimized(mz_arr, in_arr, pepmass_val, charge_val,
+                                                       filter_precursor=filter_precursor,
+                                                       filter_window=filter_window,
+                                                       filter_precursor_radius=filter_precursor_radius,
+                                                       filter_window_size=filter_window_size,
+                                                       peaks_to_keep_in_window=peaks_to_keep_in_window)
                     # Append to results regardless of mz/int being empty
                     results.append(filtered)
                 in_ions=False
@@ -295,7 +307,19 @@ def parse_mgf_file(path):
                                 pass
     return results
 
-def parse_mzml_file(path):
+def parse_mzml_file(path, filter_precursor=True, filter_window=True,
+                     filter_precursor_radius=17.0, filter_window_size=50.0,
+                     peaks_to_keep_in_window=6):
+    """Parse mzML file and filter peaks based on precursor m/z and intensity.
+    Args:
+        path (str): Path to the mzML file.
+        filter_precursor (bool): Whether to filter based on precursor m/z.
+        filter_window (bool): Whether to apply window filtering.
+        filter_precursor_radius (float): Radius for filtering around precursor m/z.
+        filter_window_size (float): Size of the window for filtering.
+        peaks_to_keep_in_window (int): Number of peaks to keep in the window.
+    """
+    
     run = pymzml.run.Reader(path)
     results=[]
     for spec in run:
@@ -311,40 +335,64 @@ def parse_mzml_file(path):
                     precursor_charge=int(precursor_charge)
                 except:
                     precursor_charge=1
-            filtered=filter_peaks_optimized(mz_arr,in_arr,precursor_mz,precursor_charge)
+            filtered=filter_peaks_optimized(mz_arr,in_arr,precursor_mz,precursor_charge,
+                                              filter_precursor=filter_precursor,
+                                                filter_window=filter_window,
+                                                filter_precursor_radius=filter_precursor_radius,
+                                                filter_window_size=filter_window_size,
+                                                peaks_to_keep_in_window=peaks_to_keep_in_window)
+            
             if len(filtered[0])>0:
                 results.append(filtered)
     return results
 
-def parse_one_file(file_path):
+def parse_one_file(file_path, filter_precursor=True, filter_window=True,
+                        filter_precursor_radius=17.0, filter_window_size=50.0,
+                        peaks_to_keep_in_window=6):
     # get file extension for absolute path
     # if path.startswith("/"):
     #     ext = os.path.splitext(path)[1]
     # else:
     ext = os.path.splitext(os.path.basename(file_path))[1]
+    # ext to lower
+    ext = ext.lower()
     print(f"Parsing file {file_path} with extension {ext}")
     if ext==".mgf":
-        return parse_mgf_file(file_path)
+        return parse_mgf_file(file_path, filter_precursor=filter_precursor,
+                                filter_window=filter_window,
+                                filter_precursor_radius=filter_precursor_radius,
+                                filter_window_size=filter_window_size,
+                                peaks_to_keep_in_window=peaks_to_keep_in_window)
     elif ext==".mzml":
-        return parse_mzml_file(file_path)
+        return parse_mzml_file(file_path, filter_precursor=filter_precursor,
+                                filter_window=filter_window,
+                                filter_precursor_radius=filter_precursor_radius,
+                                filter_window_size=filter_window_size,
+                                peaks_to_keep_in_window=peaks_to_keep_in_window)
     else:
-        # fallback
-        try:
-            return parse_mzml_file(file_path)
-        except:
-            return parse_mgf_file(file_path)
+        raise ValueError(f"Unsupported file extension: {ext}. Supported extensions are .mgf and .mzml.")
 
-def parse_files_in_parallel(file_paths, threads=1):
+def parse_files_in_parallel(file_paths, threads=1, filter_precursor=True, filter_window=True,
+                            filter_precursor_radius=17.0, filter_window_size=50.0,
+                            peaks_to_keep_in_window=6):
     if threads<=1 or len(file_paths)<=1:
         all_spectra=[]
         for fp in file_paths:
-            parsed=parse_one_file(fp)
+            parsed=parse_one_file(fp, filter_precursor=filter_precursor,
+                                  filter_window=filter_window,
+                                  filter_precursor_radius=filter_precursor_radius,
+                                  filter_window_size=filter_window_size,
+                                  peaks_to_keep_in_window=peaks_to_keep_in_window)
             all_spectra.extend(parsed)
         return all_spectra
     else:
         all_spectra=[]
         with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as ex:
-            futs=[ex.submit(parse_one_file,fp) for fp in file_paths]
+            futs=[ex.submit(parse_one_file,fp, filter_precursor=filter_precursor,
+                             filter_window=filter_window,
+                             filter_precursor_radius=filter_precursor_radius,
+                             filter_window_size=filter_window_size,
+                             peaks_to_keep_in_window=peaks_to_keep_in_window) for fp in file_paths]
             for fut in concurrent.futures.as_completed(futs):
                 all_spectra.extend(fut.result())
         return all_spectra
