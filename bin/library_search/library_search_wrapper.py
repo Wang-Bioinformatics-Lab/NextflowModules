@@ -17,7 +17,10 @@ def search_files(spectrum_file, library_file, temp_folder, tempresults_folder, p
     pm_tolerance=2.0, 
     ion_tolerance=0.5, 
     analog_search=0, 
-    max_shift_mass=0.5):
+    max_shift_mass=0.5,
+    filter_precursor=1,
+    filter_window=1):
+    
 
 
     parameter_filename = os.path.join(temp_folder, str(uuid.uuid4()) + ".params")
@@ -32,9 +35,9 @@ def search_files(spectrum_file, library_file, temp_folder, tempresults_folder, p
     output_parameter_file.write("MAX_SHIFT_MASS={}\n".format(1999))
 
     #Filtering Criteria
-    output_parameter_file.write("FILTER_PRECURSOR_WINDOW={}\n".format(1))
+    output_parameter_file.write("FILTER_PRECURSOR_WINDOW={}\n".format(filter_precursor))
     output_parameter_file.write("MIN_PEAK_INT={}\n".format(0))
-    output_parameter_file.write("WINDOW_FILTER={}\n".format(1))
+    output_parameter_file.write("WINDOW_FILTER={}\n".format(filter_window))
     output_parameter_file.write("FILTER_LIBRARY={}\n".format(1))
 
     #Scoring Criteria
@@ -102,6 +105,8 @@ def main():
     # This is good for bookkeeping in GNPS2 if you need the full path
     parser.add_argument('--full_relative_query_path', default=None, help='This is the original full relative path of the input file')
     
+    parser.add_argument('--filter_precursor', default=1, type=int, help='Filter precursor peaks (1) or not (0)')
+    parser.add_argument('--filter_window', default=1, type=int, help='Filter peaks in a window (1) or not (0)')
 
 
     args = parser.parse_args()
@@ -129,7 +134,10 @@ def main():
         top_k_results=args.topk, 
         pm_tolerance=args.pm_tolerance,
         ion_tolerance=args.fragment_tolerance,
-        analog_search=args.analog_search)
+        analog_search=args.analog_search,
+        filter_precursor=args.filter_precursor,
+        filter_window=args.filter_window
+    )
 
     # Reformatting the output
     output_results_file = os.path.join(args.result_folder, os.path.basename(args.spectrum_file) + "_" + os.path.basename(args.library_file) + ".tsv")

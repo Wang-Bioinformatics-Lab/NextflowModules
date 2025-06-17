@@ -404,8 +404,8 @@ def main():
         mz = np.asarray(mz)
         intensity = np.asarray(intensity)
         return gnps_index.filter_peaks_optimized(mz, intensity, precursor_mz, precursor_charge,
-                                                 filter_precursor=args.filter_precursor == 1,
-                                                 filter_window= args.filter_window == 1)
+                                                 filter_precursor=(args.filter_precursor == 1),
+                                                 filter_window=(args.filter_window == 1))
 
     spectrum_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in spectrum_mgf]
     library_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in library_mgf]

@@ -16,6 +16,8 @@ process searchDataGNPS {
     val library_min_cosine
     val library_min_matched_peaks
     val analog_search
+    val filter_precursor
+    val filter_window
 
     output:
     file 'search_results/*' optional true
@@ -35,7 +37,9 @@ process searchDataGNPS {
         --library_min_cosine $library_min_cosine \
         --library_min_matched_peaks $library_min_matched_peaks \
         --analog_search "$analog_search" \
-        --full_relative_query_path "$full_path"
+        --full_relative_query_path "$full_path" \
+        --filter_precursor "$filter_precursor" \
+        --filter_window "$filter_window"
     """
 }
 
@@ -54,6 +58,8 @@ process searchDataGNPSIndexed {
     val library_min_cosine
     val library_min_matched_peaks
     val analog_search
+    val filter_precursor
+    val filter_window
 
     output:
     file 'search_results/*' optional true
@@ -76,7 +82,9 @@ process searchDataGNPSIndexed {
         --library_min_cosine $library_min_cosine \
         --library_min_matched_peaks $library_min_matched_peaks \
         --analog_search "$analog_search" \
-        --full_relative_query_path "$full_path"
+        --full_relative_query_path "$full_path"\
+        --filter_precursor "$filter_precursor" \
+        --filter_window "$filter_window"
     """
 }
 
