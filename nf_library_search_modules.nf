@@ -61,6 +61,9 @@ process searchDataGNPSIndexed {
     """
     mkdir -p search_results
 
+    # Addressing race condition for symlinks in NextFlow for GNPS2
+    sleep 1
+
     python $params.TOOL_FOLDER/library_search_indexed.py \
         "$input_spectrum" \
         "$input_library" \
