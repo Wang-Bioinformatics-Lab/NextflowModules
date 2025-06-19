@@ -386,6 +386,8 @@ def main():
     # This is good for bookkeeping in GNPS2 if you need the full path
     parser.add_argument('--full_relative_query_path', default=None, help='This is the original full relative path of the input file')
     
+
+    
     args = parser.parse_args()
     # print("starting to read files", args.spectrum_file, args.library_file)
     # start_time = time.time()
@@ -394,6 +396,10 @@ def main():
     library_mgf = read_file(args.library_file)
     # print("Reading the files took:", time.time() - start_time, "seconds")
     # start_time = time.time()
+    
+    if len(spectrum_mgf) == 0 or len(library_mgf) == 0:
+        print("No spectra found in the input files. Exiting.")
+        sys.exit(0)
     
     def convert_single_spectrum_to_spectrum_list(data_dict):
         mz = [float(x[0]) for x in data_dict['PEAKS']]
