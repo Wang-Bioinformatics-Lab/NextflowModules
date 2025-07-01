@@ -286,65 +286,72 @@ def read_mzml_spectrum(file_path, drop_ms1=True):
     result = []
     with mzml.MzML(file_path) as reader:
         for spectrum in reader:
-            ms_level = spectrum["ms level"]
-            scan = -1
-            index = int(spectrum["index"])
-            peaks = []
+            try:
+                ms_level = spectrum["ms level"]
+                scan = -1
+                index = int(spectrum["index"])
+                peaks = []
 
-            for i in range(len(spectrum["m/z array"])):
-                peaks.append([float(spectrum["m/z array"][i]), float(spectrum["intensity array"][i])])
+                for i in range(len(spectrum["m/z array"])):
+                    peaks.append([float(spectrum["m/z array"][i]), float(spectrum["intensity array"][i])])
 
-            # Determining scan
-            for id_split in spectrum["id"].split(" "):
-                if id_split.find("scan=") != -1:
-                    scan = int(id_split.replace("scan=", ""))
-                if "scanId=" in id_split:
-                    scan = int(id_split.replace("scanId=", ""))
+                # Determining scan
+                for id_split in spectrum["id"].split(" "):
+                    if id_split.find("scan=") != -1:
+                        scan = int(id_split.replace("scan=", ""))
+                    if "scanId=" in id_split:
+                        scan = int(id_split.replace("scanId=", ""))
 
-            if ms_level == 1 and not drop_ms1:
-                result.append({
-                    'filename': file_path,
-                    'SCANS': scan,
-                    'index': index,
-                    'PEAKS': peaks,
-                    'PEPMASS': 0,
-                    'precursor_intensity': 0,
-                    'CHARGE': 0,
-                    'ms_level': ms_level
-                })
-            elif ms_level == 2:
-                precursor_list = spectrum["precursorList"]["precursor"][0]
-                activation = precursor_list["activation"]
-                collision_energy = float(activation.get("collision energy", 0))
+                if ms_level == 1 and not drop_ms1:
+                    result.append({
+                        'filename': file_path,
+                        'SCANS': scan,
+                        'index': index,
+                        'PEAKS': peaks,
+                        'PEPMASS': 0,
+                        'precursor_intensity': 0,
+                        'CHARGE': 0,
+                        'ms_level': ms_level
+                    })
+                elif ms_level == 2:
+                    precursor_list = spectrum["precursorList"]["precursor"][0]
+                    activation = precursor_list["activation"]
+                    collision_energy = float(activation.get("collision energy", 0))
 
-                selected_ion_list = precursor_list["selectedIonList"]
-                precursor_mz = np.float32(float(selected_ion_list["selectedIon"][0]["selected ion m/z"])) # precursor mass is converted to float 32 to match legacy GNPS result.
-                precursor_intensity = float(selected_ion_list["selectedIon"][0].get("peak intensity", 0))
-                precursor_charge = int(selected_ion_list["selectedIon"][0].get("charge state", 0))
+                    selected_ion_list = precursor_list["selectedIonList"]
+                    precursor_intensity = float(selected_ion_list["selectedIon"][0].get("peak intensity", 0))
+                    precursor_charge = int(selected_ion_list["selectedIon"][0].get("charge state", 0))
 
-                fragmentation_method = "NO_FRAG"
-                totIonCurrent = float(spectrum["total ion current"])
-
-                try:
-                    for key in activation:
-                        if key == "beam-type collision-induced dissociation":
-                            fragmentation_method = "HCD"
-                except:
                     fragmentation_method = "NO_FRAG"
+                    totIonCurrent = float(spectrum.get("total ion current", 0))
+                    try:
+                        precursor_mz = np.float32(float(selected_ion_list["selectedIon"][0]["selected ion m/z"])) # precursor mass is converted to float 32 to match legacy GNPS result.
+                    except:
+                        precursor_mz = 0.0
 
-                result.append({
-                    'filename': file_path,
-                    'SCANS': scan,
-                    'index': index,
-                    'PEAKS': peaks,
-                    'PEPMASS': precursor_mz,
-                    'precursor_intensity': precursor_intensity,
-                    'CHARGE': precursor_charge,
-                    'ms_level': ms_level,
-                    'collision_energy': collision_energy,
-                    'fragmentation_method': fragmentation_method,
-                    'totIonCurrent': totIonCurrent
-                })
+                    try:
+                        for key in activation:
+                            if key == "beam-type collision-induced dissociation":
+                                fragmentation_method = "HCD"
+                    except:
+                        fragmentation_method = "NO_FRAG"
+
+                    result.append({
+                        'filename': file_path,
+                        'SCANS': scan,
+                        'index': index,
+                        'PEAKS': peaks,
+                        'PEPMASS': precursor_mz,
+                        'precursor_intensity': precursor_intensity,
+                        'CHARGE': precursor_charge,
+                        'ms_level': ms_level,
+                        'collision_energy': collision_energy,
+                        'fragmentation_method': fragmentation_method,
+                        'totIonCurrent': totIonCurrent
+                    })
+            except KeyError as e:
+                print(f"KeyError in spectrum {spectrum.get('id', 'unknown')}: {e}")
+                continue
     return result
     
 
