@@ -324,10 +324,8 @@ def read_mzml_spectrum(file_path, drop_ms1=True):
 
                     fragmentation_method = "NO_FRAG"
                     totIonCurrent = float(spectrum.get("total ion current", 0))
-                    try:
-                        precursor_mz = np.float32(float(selected_ion_list["selectedIon"][0]["selected ion m/z"])) # precursor mass is converted to float 32 to match legacy GNPS result.
-                    except:
-                        precursor_mz = 0.0
+                    
+                    precursor_mz = np.float32(float(selected_ion_list["selectedIon"][0]["selected ion m/z"])) # precursor mass is converted to float 32 to match legacy GNPS result.
 
                     try:
                         for key in activation:
