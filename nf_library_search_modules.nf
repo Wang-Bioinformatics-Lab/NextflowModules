@@ -71,8 +71,8 @@ process searchDataGNPSIndexed {
     sleep 1
 
     python $params.TOOL_FOLDER/library_search_indexed.py \
-        "$input_spectrum" \
-        "$input_library" \
+        $input_spectrum \
+        $input_library \
         search_results \
         $params.TOOL_FOLDER/convert \
         $params.TOOL_FOLDER/main_execmodule.allcandidates \
