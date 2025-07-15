@@ -1,0 +1,17 @@
+channels:
+  - conda-forge
+  - defaults
+  - bioconda
+dependencies:
+  - python=3.9
+  - numpy>=2.0.0
+  - pandas
+  - numba
+  - pymzml
+  - sortedcollections
+  - pip:
+    - xmltodict
+    - requests
+    - scipy
+    - tqdm
+    - pyteomics
