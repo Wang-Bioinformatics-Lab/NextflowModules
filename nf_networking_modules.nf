@@ -17,6 +17,7 @@ process calculatePairs_index {
     val min_cosine
     val parallelism
     val alignment_strategy
+    val enable_peak_filtering
 
     output:
     file "${chunk_id}.params_aligns.tsv"
@@ -28,7 +29,8 @@ process calculatePairs_index {
         --total_chunks $parallelism \
         --tolerance $ms2_tolerance \
         --threshold $min_cosine \
-        --alignment_strategy "$alignment_strategy"
+        --alignment_strategy "$alignment_strategy" \
+        --enable_peak_filtering $enable_peak_filtering
     """
 }
 

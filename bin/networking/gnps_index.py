@@ -7,6 +7,8 @@ import pymzml
 import math
 import time
 import argparse
+import gc
+from peak_filter import *
 
 SHIFTED_OFFSET = 6000
 TOPK = 10
@@ -21,7 +23,7 @@ SpectrumTuple = numba.types.Tuple([
     numba.int32  # precursor_charge
 ])
 
-def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_charge):
+def filter_peaks_only_sqrt(mz_array, intensity_array, precursor_mz, precursor_charge):
     """Only apply sqrt transform and L2 normalization without filtering"""
     if len(mz_array) == 0:
         return (
@@ -44,7 +46,8 @@ def filter_peaks_optimized(mz_array, intensity_array, precursor_mz, precursor_ch
 
     return (mz_sorted, int_sorted, np.float32(precursor_mz), np.int32(precursor_charge))
 
-def parse_mgf_file(path):
+
+def parse_mgf_file(path, enable_peak_filtering=False):
     results=[]
     with open(path,'r') as f:
         in_ions=False
@@ -78,7 +81,12 @@ def parse_mgf_file(path):
                     # Always create mz and intensity arrays, even if empty
                     mz_arr = np.array(current["mz"], dtype=np.float32)
                     in_arr = np.array(current["int"], dtype=np.float32)
-                    filtered = filter_peaks_optimized(mz_arr, in_arr, pepmass_val, charge_val)
+                    
+                    if enable_peak_filtering:
+                        filtered = filter_peaks_optimized(mz_arr, in_arr, pepmass_val, charge_val)
+                    else:
+                        filtered = filter_peaks_only_sqrt(mz_arr, in_arr, pepmass_val, charge_val)
+                    
                     # Append to results regardless of mz/int being empty
                     results.append((scan_id, filtered))
                 in_ions=False
@@ -110,7 +118,7 @@ def parse_mgf_file(path):
 
     return results
 
-def parse_mzml_file(path):
+def parse_mzml_file(path, enable_peak_filtering=False):
     run = pymzml.run.Reader(path)
     results_with_scans=[]
     for spec in run:
@@ -120,12 +128,13 @@ def parse_mzml_file(path):
 
             scan_id = None
             scan_id_str = str(spec.ID)
+            #print(scan_id_str)
             
             try:
                 if "scan=" in scan_id_str:
                     scan_id = int(scan_id_str.split("scan=")[-1].split()[0])
                 elif "_" in scan_id_str:
-                    scan_id = int(scan_id_str.split('_')[-1])
+                    continue
                 else:
                     scan_id = int(scan_id_str)
             except (ValueError, IndexError):
@@ -143,37 +152,42 @@ def parse_mzml_file(path):
                     precursor_charge=int(precursor_charge)
                 except:
                     precursor_charge=1
-            filtered=filter_peaks_optimized(mz_arr,in_arr,precursor_mz,precursor_charge)
+            
+            if enable_peak_filtering:
+                filtered=filter_peaks_optimized(mz_arr,in_arr,precursor_mz,precursor_charge)
+            else:
+                filtered=filter_peaks_only_sqrt(mz_arr,in_arr,precursor_mz,precursor_charge)
+                
             if len(filtered[0])>0:
                 results_with_scans.append((scan_id, filtered))
 
     results_with_scans.sort(key=lambda x: x[0])
     return results_with_scans
 
-def parse_one_file(path):
+def parse_one_file(path, enable_peak_filtering=False):
     ext=os.path.splitext(path)[1].lower()
     if ext==".mgf":
-        return parse_mgf_file(path)
+        return parse_mgf_file(path, enable_peak_filtering)
     elif ext==".mzML":
-        return parse_mzml_file(path)
+        return parse_mzml_file(path, enable_peak_filtering)
     else:
         # fallback
         try:
-            return parse_mzml_file(path)
+            return parse_mzml_file(path, enable_peak_filtering)
         except:
-            return parse_mgf_file(path)
+            return parse_mgf_file(path, enable_peak_filtering)
 
-def parse_files_in_parallel(file_paths, threads=1):
+def parse_files_in_parallel(file_paths, threads=1, enable_peak_filtering=False):
     if threads<=1 or len(file_paths)<=1:
         all_spectra=[]
         for fp in file_paths:
-            parsed=parse_one_file(fp)
+            parsed=parse_one_file(fp, enable_peak_filtering)
             all_spectra.extend(parsed)
         return all_spectra
     else:
         all_spectra=[]
         with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as ex:
-            futs=[ex.submit(parse_one_file,fp) for fp in file_paths]
+            futs=[ex.submit(parse_one_file,fp, enable_peak_filtering) for fp in file_paths]
             for fut in concurrent.futures.as_completed(futs):
                 all_spectra.extend(fut.result())
         return all_spectra
@@ -181,7 +195,7 @@ def parse_files_in_parallel(file_paths, threads=1):
 
 @numba.njit
 def create_index(spectra, is_shifted, tolerance, shifted_offset):
-    """Create index structure for fast lookups"""
+    """Create index structure for fast lookups (now uses int32/float32 for memory efficiency)"""
     entries = List()
     for spec_idx in range(len(spectra)):
         spec = spectra[spec_idx]
@@ -193,13 +207,13 @@ def create_index(spectra, is_shifted, tolerance, shifted_offset):
             intensity = spec[1][peak_idx]
 
             if is_shifted:
-                bin_val = np.int64(round(
+                bin_val = np.int32(round(
                     (precursor_mz - mz + shifted_offset) / tolerance
                 ))
             else:
-                bin_val = np.int64(round(mz / tolerance))
+                bin_val = np.int32(round(mz / tolerance))
 
-            entries.append((bin_val, spec_idx, peak_idx, mz, intensity))
+            entries.append((bin_val, np.int32(spec_idx), np.int32(peak_idx), np.float32(mz), np.float32(intensity)))
 
     entries.sort()
     return entries
@@ -630,15 +644,22 @@ def parse_arguments():
                         help="Number of processing threads")
     parser.add_argument("--alignment_strategy", type=str, default="index_single_charge",
                         help="Choosing which alignment strategy to use, options are: index_single_charge, index_multi_charge")
+    parser.add_argument("--enable_peak_filtering", type=str, default="false",
+                        help="Enable peak filtering using filter_peaks_optimized instead of filter_peaks_only_sqrt (true/false)")
     return parser.parse_args()
 
 
 def main():
     args = parse_arguments()
 
-    # Parse spectra
-    parsed_spectra_with_metadata = parse_files_in_parallel(args.input_files, args.threads)
+    args.enable_peak_filtering = str(args.enable_peak_filtering).lower() in ["true", "1", "yes"]
+
+    # parse input file time
+    t0 = time.time()
+    parsed_spectra_with_metadata = parse_files_in_parallel(args.input_files, args.threads, args.enable_peak_filtering)
+    t1 = time.time()
     print(f"Parsed {len(parsed_spectra_with_metadata)} spectra")
+    print(f"[Time] Parse input file: {t1 - t0:.2f} seconds")
 
     # Separate metadata from spectra
     spectra_list = [item[1] for item in parsed_spectra_with_metadata]
@@ -653,6 +674,11 @@ def main():
             np.float32(spec[2]),
             np.int32(spec[3])
         ))
+
+    del parsed_spectra_with_metadata
+    del spectra_list
+    gc.collect()
+
     n_spectra = len(numba_spectra)
     query_start, query_end = get_query_range(n_spectra, args.chunk_id, args.total_chunks)
     print(f"Chunk {args.chunk_id}/{args.total_chunks} processing pairs {query_start} to {query_end}")
@@ -670,16 +696,20 @@ def main():
 
         scoring_func = calculate_exact_score_GNPS
 
-    # Compute matches
+    # calculate all pairs time
     print("Computing pairs...")
+    t2 = time.time()
     matches = compute_all_pairs(numba_spectra, shared_idx, shifted_idx,
                                 args.tolerance, args.threshold, scoring_func,query_start=query_start,
     query_end=query_end)
+    t3 = time.time()
+    print(f"[Time] Calculate all pairs: {t3 - t2:.2f} seconds")
 
     output_filename = f"{args.chunk_id}.params_aligns.tsv"
     
-    # Write output in Nextflow-compatible format
+    # write mzml result time
     print("Writing results...")
+    t4 = time.time()
     with open(output_filename, 'w') as f:
         f.write("CLUSTERID1\tCLUSTERID2\tDeltaMZ\tMinRatio\tCosine\tAlignScore2\tAlignScore3\n")
         for query_idx, candidates in matches:
@@ -700,6 +730,8 @@ def main():
                 f.write(f"{cluster1}\t{cluster2}\t"
                         f"{delta_mz:.3f}\t0.000\t{cosine:.4f}\t"
                         f"0.000\t0.000\n")
+    t5 = time.time()
+    print(f"[Time] Write output: {t5 - t4:.2f} seconds")
 
     print("Done!")
 
