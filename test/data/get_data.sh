@@ -1,0 +1,1 @@
+wget "https://massive.ucsd.edu/ProteoSAFe/DownloadResultFile?forceDownload=true&file=f.MSV000086206/ccms_peak/raw/S_N1.mzML" --output-document S_N1.mzML
