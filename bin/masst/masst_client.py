@@ -9,6 +9,97 @@ from pyteomics import mgf
 from pyteomics import mzml
 from gnpsdata import fasst
 
+# this provides a list of queries dicts
+def prep_query_mgf_queries(querymgf_filename, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
+    mgf_data = mgf.MGF(querymgf_filename)
+    queries = []
+
+    for spectrum in mgf_data:
+        mz = spectrum["m/z array"]
+        intensity = spectrum["intensity array"]
+        peaks_zip = list(zip(mz, intensity))
+        precursor_mz = spectrum["params"]["pepmass"][0]
+
+        query_scan = spectrum["params"]["scans"]
+
+        query = {
+            "datasource": "mgf",
+            "precursor_mz": precursor_mz,
+            "peaks": peaks_zip,
+            "database": database,
+            "analog": analog,
+            "precursor_mz_tol": precursor_mz_tol,
+            "fragment_mz_tol": fragment_mz_tol,
+            "min_cos": min_cos,
+            "query_scan": query_scan
+        }
+
+        queries.append(query)
+
+    return queries
+
+def execute_all_queries(queries):
+    output_results_list = []
+
+    for query in tqdm(queries):
+        try:
+            results_dict = fasst.query_fasst_api_peaks(
+                query["precursor_mz"],
+                query["peaks"],
+                query["database"],
+                analog=query["analog"],
+                precursor_mz_tol=query["precursor_mz_tol"],
+                fragment_mz_tol=query["fragment_mz_tol"],
+                min_cos=query["min_cos"]
+            )
+            
+            if "status" in results_dict:
+                    #print(results_dict["status"])
+                    #print("Error in Results.")
+                    continue
+
+            results_df = pd.DataFrame(results_dict["results"])
+
+            # adding the scan number information
+            results_df["query_scan"] = query["query_scan"]
+
+            output_results_list.append(results_df)
+        except KeyboardInterrupt:
+            raise
+        except:
+            print("Error in Query")
+            #raise
+            pass
+
+    if len(output_results_list) == 0:
+        print("No results found")
+        return pd.DataFrame()
+
+    output_results_df = pd.concat(output_results_list)
+
+    return output_results_df
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def masst_query_mgf_all(querymgf_filename, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
     # Read the MGF file
     mgf_data = mgf.MGF(querymgf_filename)
@@ -213,11 +304,16 @@ def main():
 
     elif args.input_file.endswith(".mgf"):
         print("READING THE MGF FILE")
-        output_results_df = masst_query_mgf_all(args.input_file, 
-                                        args.database, 
-                                        analog=analog_boolean,
-                                        precursor_mz_tol=args.precursor_tolerance,
-                                        fragment_mz_tol=args.fragment_tolerance)
+        # output_results_df = masst_query_mgf_all(args.input_file, 
+        #                                 args.database, 
+        #                                 analog=analog_boolean,
+        #                                 precursor_mz_tol=args.precursor_tolerance,
+        #                                 fragment_mz_tol=args.fragment_tolerance)
+        queries_list = prep_query_mgf_queries(args.input_file,
+                                                args.database, 
+                                                analog=analog_boolean,
+                                                precursor_mz_tol=args.precursor_tolerance,
+                                                fragment_mz_tol=args.fragment_tolerance)
 
     elif args.input_file.lower().endswith(".mzml"):
         print("READING THE MZML FILE")
@@ -226,6 +322,9 @@ def main():
                                         analog=analog_boolean,
                                         precursor_mz_tol=args.precursor_tolerance,
                                         fragment_mz_tol=args.fragment_tolerance)
+
+    # lets actually execute it
+    output_results_df = execute_all_queries(queries_list)
 
     output_results_df.to_csv(args.output_file, index=False, sep="\t")
 
