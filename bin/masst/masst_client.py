@@ -40,7 +40,7 @@ def masst_query_mgf_all(querymgf_filename, database, analog=False, precursor_mz_
             results_df = pd.DataFrame(results_dict["results"])
 
             # adding the scan number information
-            results_df["scan"] = spectrum["params"]["scans"]
+            results_df["query_scan"] = spectrum["params"]["scans"]
 
             output_results_list.append(results_df)
         except KeyboardInterrupt:
@@ -104,7 +104,7 @@ def masst_query_mzml_all(query_mzml_filename, database, analog=False, precursor_
             results_df = pd.DataFrame(results_dict["results"])
 
             # adding the scan number information
-            results_df["scan"] = spectrum_id
+            results_df["query_scan"] = spectrum_id
 
             output_results_list.append(results_df)
         except KeyboardInterrupt:
@@ -132,7 +132,10 @@ def masst_query_usi_all(query_df, database,
     for query_element in tqdm(query_df.to_dict(orient="records")):
         try:
 
-            usi = query_element["usi"]
+            if "usi" in query_element:
+                usi = query_element["usi"]
+            elif "USI"  in query_element:
+                usi = query_element["USI"]
 
             results_dict = fasst.query_fasst_api_usi(usi, database,
                 analog=analog, 
@@ -154,7 +157,6 @@ def masst_query_usi_all(query_df, database,
             output_results_list.append(results_df)
         except:
             print("Error in Query")
-            raise
             pass
 
     if len(output_results_list) == 0:
@@ -198,8 +200,6 @@ def main():
             else:
                 print("Unsupported file format")
                 sys.exit(1)
-
-        print(query_df)
 
         output_results_df = masst_query_usi_all(query_df, 
                                         args.database, 
