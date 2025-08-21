@@ -188,7 +188,11 @@ def main():
 
     # checking extension
     if args.input_file.endswith(".csv") or args.input_file.endswith(".tsv"):
-        query_df = pd.read_csv(args.input_file, sep=None)
+        try:
+            query_df = pd.read_csv(args.input_file, sep=None)
+        except:
+            query_df = pd.DataFrame()
+            print("Error reading input file")
 
         # checking if usi in header
         if "usi" not in query_df.columns:
