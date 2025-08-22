@@ -26,3 +26,8 @@ test_masst_usi_file_big_batch:
 	python ../bin/masst/masst_client.py ./data/test_usi_big.csv test_usi_results_batch.tsv \
 	--querymode batch \
 	--database metabolomicspanrepo_index_nightly
+
+test_masst_usi_file_big_batch_library:
+	python ../bin/masst/masst_client.py ./data/test_usi_big.csv test_usi_results_batch_library.tsv \
+	--querymode batch \
+	--database gnpslibrary

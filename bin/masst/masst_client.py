@@ -200,7 +200,6 @@ def execute_all_queries_batch(queries):
         print("WAITING FOR RESULTS to be ready")
         time.sleep(1)
         for k in range(0, 60):
-            all_results_finished = True
             pending_count = 0
             for i, status in enumerate(status_results_list):
                 if status["status"] == "DONE" or status["status"] == "TIMEOUT":
@@ -209,7 +208,6 @@ def execute_all_queries_batch(queries):
                 print("Checking status for", i, status["status"])
                 
                 # checking on the results
-                all_results_finished = False
                 try:
                     results = fasst.get_results(status, blocking=False)
                     if results == "PENDING":
@@ -231,7 +229,7 @@ def execute_all_queries_batch(queries):
 
             print("Pending Count", pending_count)
 
-            if all_results_finished:
+            if pending_count == 0:
                 break
 
             # waiting
