@@ -2,6 +2,7 @@ import os
 import sys
 import pandas as pd
 import argparse
+import time
 import requests
 import requests_cache
 from tqdm import tqdm
@@ -38,20 +39,88 @@ def prep_query_mgf_queries(querymgf_filename, database, analog=False, precursor_
 
     return queries
 
-def execute_all_queries(queries):
+def prep_query_mzml_queries(querymzml_filename, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
+    mzml_data = mzml.MZML(querymzml_filename)
+    queries = []
+
+    for spectrum in mzml_data:
+        mz = spectrum["m/z array"]
+        intensity = spectrum["intensity array"]
+        peaks_zip = list(zip(mz, intensity))
+        precursor_mz = spectrum["params"]["pepmass"][0]
+
+        query_scan = spectrum["params"]["scans"]
+
+        query = {
+            "datasource": "mzml",
+            "precursor_mz": precursor_mz,
+            "peaks": peaks_zip,
+            "database": database,
+            "analog": analog,
+            "precursor_mz_tol": precursor_mz_tol,
+            "fragment_mz_tol": fragment_mz_tol,
+            "min_cos": min_cos,
+            "query_scan": query_scan
+        }
+
+        queries.append(query)
+
+    return queries
+
+def prep_query_usi_queries(query_df, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
+    
+    queries = []
+
+    for query_element in tqdm(query_df.to_dict(orient="records")):
+        try:
+            if "usi" in query_element:
+                usi = query_element["usi"]
+            elif "USI"  in query_element:
+                usi = query_element["USI"]
+
+            query = {
+                "datasource": "usi",
+                "usi": usi,
+                "database": database,
+                "analog": analog,
+                "precursor_mz_tol": precursor_mz_tol,
+                "fragment_mz_tol": fragment_mz_tol,
+                "min_cos": min_cos
+            }
+
+            queries.append(query)
+
+        except:
+            print("Error in Query")
+            pass
+
+    return queries
+
+def execute_all_queries_sync(queries):
     output_results_list = []
 
     for query in tqdm(queries):
         try:
-            results_dict = fasst.query_fasst_api_peaks(
-                query["precursor_mz"],
-                query["peaks"],
-                query["database"],
-                analog=query["analog"],
-                precursor_mz_tol=query["precursor_mz_tol"],
-                fragment_mz_tol=query["fragment_mz_tol"],
-                min_cos=query["min_cos"]
-            )
+            # TODO check the type, to determine which API to use
+            if query["datasource"] == "usi":
+                results_dict = fasst.query_fasst_api_usi(
+                    query["usi"],
+                    query["database"],
+                    analog=query["analog"],
+                    precursor_mz_tol=query["precursor_mz_tol"],
+                    fragment_mz_tol=query["fragment_mz_tol"],
+                    min_cos=query["min_cos"]
+                )
+            else:
+                results_dict = fasst.query_fasst_api_peaks(
+                    query["precursor_mz"],
+                    query["peaks"],
+                    query["database"],
+                    analog=query["analog"],
+                    precursor_mz_tol=query["precursor_mz_tol"],
+                    fragment_mz_tol=query["fragment_mz_tol"],
+                    min_cos=query["min_cos"]
+                )
             
             if "status" in results_dict:
                     #print(results_dict["status"])
@@ -67,9 +136,128 @@ def execute_all_queries(queries):
         except KeyboardInterrupt:
             raise
         except:
-            print("Error in Query")
-            #raise
+            print("Error in Query Execution")
+            raise
             pass
+
+    if len(output_results_list) == 0:
+        print("No results found")
+        return pd.DataFrame()
+
+    output_results_df = pd.concat(output_results_list)
+
+    return output_results_df
+
+
+# Running all queries in batch
+def execute_all_queries_batch(queries):
+    output_results_list = []
+
+    # group queries list into batches
+    batch_size = 50
+    query_batches = [queries[i:i + batch_size] for i in range(0, len(queries), batch_size)]
+
+    for batch in query_batches:
+        print("Processing batch of size", len(batch))
+        status_results_list = []
+        for query in tqdm(batch):
+            try:
+                if query["datasource"] == "usi":     
+                    status = fasst.query_fasst_api_usi(
+                        query["usi"],
+                        query["database"],
+                        analog=query["analog"],
+                        precursor_mz_tol=query["precursor_mz_tol"],
+                        fragment_mz_tol=query["fragment_mz_tol"],
+                        min_cos=query["min_cos"],
+                        blocking=False
+                    )
+                else:
+                    status = fasst.query_fasst_api_peaks(
+                        query["precursor_mz"],
+                        query["peaks"],
+                        query["database"],
+                        analog=query["analog"],
+                        precursor_mz_tol=query["precursor_mz_tol"],
+                        fragment_mz_tol=query["fragment_mz_tol"],
+                        min_cos=query["min_cos"],
+                        blocking=False
+                    )
+                
+                print("ZZZZZZZZZZZZZZZZZ", status)
+                status_results_list.append(status)
+            except KeyboardInterrupt:
+                raise
+            except:
+                print("Error in Query")
+                pass
+
+        print("+++++++++++++++++++")
+        print(status_results_list)
+
+            
+        # lets now wait for all the results to be ready and grab them
+        print("WAITING FOR RESULTS to be ready")
+        time.sleep(1)
+        for k in range(0, 60):
+            all_results_finished = True
+            pending_count = 0
+            for i, status in enumerate(status_results_list):
+                if status["status"] == "DONE" or status["status"] == "TIMEOUT":
+                    continue
+
+                print("Checking status for", i, status["status"])
+                
+                # checking on the results
+                all_results_finished = False
+                try:
+                    results = fasst.get_results(status, blocking=False)
+                    if results == "PENDING":
+                        status["status"] = "PENDING"
+                        print("PENDING Results for", i)
+                        pending_count += 1
+                        continue
+                    else:
+                        print("XXXXXXXXXXXXXXXXXXXX - RESULTS DONE for", i)
+                        status["status"] = "DONE"
+                        status["results"] = results["results"]
+                except KeyboardInterrupt:
+                    raise
+                except:
+                    status["status"] = "ERROR"
+                    print("")
+                    continue
+
+            print("Pending Count", pending_count)
+
+            if all_results_finished:
+                break
+
+            # waiting
+            time.sleep(5)
+        
+        # Formatting all results
+        for status in status_results_list:
+            if status["status"] == "DONE":
+                print("XXXXXXXXXXXXXXXXXX Total Hits", len(status["results"]))
+
+                results_df = pd.DataFrame(status["results"])
+
+                # adding the scan number information
+                if "query_scan" in query:
+                    results_df["query_scan"] = query["query_scan"]
+                if "usi" in query:
+                    results_df["query_usi"] = query["usi"]
+
+                output_results_list.append(results_df)
+
+            elif status["status"] == "PENDING":
+                print("Pending Results")
+            elif status["status"] == "ERROR":
+                print("Error in Results")
+            else:
+                print("Unknown Status", status["status"])
+        
 
     if len(output_results_list) == 0:
         print("No results found")
@@ -89,18 +277,7 @@ def execute_all_queries(queries):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-def masst_query_mgf_all(querymgf_filename, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
+def masst_query_mgf_streaming(querymgf_filename, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
     # Read the MGF file
     mgf_data = mgf.MGF(querymgf_filename)
     output_results_list = []
@@ -153,7 +330,7 @@ def _get_scan(spectrum_id_string):
     if "scan" in spectrum_id_string:
         return spectrum_id_string.split("scan=")[-1]
 
-def masst_query_mzml_all(query_mzml_filename, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
+def masst_query_mzml_streaming(query_mzml_filename, database, analog=False, precursor_mz_tol=0.02, fragment_mz_tol=0.02, min_cos=0.7):
     # reading mzml with pyteomics
     mzml_data = mzml.read(query_mzml_filename)
     output_results_list = []
@@ -213,7 +390,7 @@ def masst_query_mzml_all(query_mzml_filename, database, analog=False, precursor_
 
     return output_results_df
 
-def masst_query_usi_all(query_df, database, 
+def masst_query_usi_streaming(query_df, database, 
                             analog=False, 
                             precursor_mz_tol=0.02, 
                             fragment_mz_tol=0.02,
@@ -277,54 +454,100 @@ def main():
 
     analog_boolean = args.analog == "Yes"
 
-    # checking extension
-    if args.input_file.endswith(".csv") or args.input_file.endswith(".tsv"):
-        try:
-            query_df = pd.read_csv(args.input_file, sep=None)
-        except:
-            query_df = pd.DataFrame()
-            print("Error reading input file")
 
-        # checking if usi in header
-        if "usi" not in query_df.columns:
-            # lets try to load with explicit extensions
-            if args.input_file.endswith(".csv"):
-                query_df = pd.read_csv(args.input_file, sep=",")
-            elif args.input_file.endswith(".tsv"):
-                query_df = pd.read_csv(args.input_file, sep="\t")
-            else:
-                print("Unsupported file format")
-                sys.exit(1)
+    # With sync
+    if args.querymode == "sync":
+            # checking extension
+        if args.input_file.endswith(".csv") or args.input_file.endswith(".tsv"):
+            try:
+                query_df = pd.read_csv(args.input_file, sep=None)
+            except:
+                query_df = pd.DataFrame()
 
-        output_results_df = masst_query_usi_all(query_df, 
-                                        args.database, 
-                                        analog=analog_boolean,
-                                        precursor_mz_tol=args.precursor_tolerance,
-                                        fragment_mz_tol=args.fragment_tolerance)
+            # checking if usi in header
+            if "usi" not in query_df.columns:
+                # lets try to load with explicit extensions
+                if args.input_file.endswith(".csv"):
+                    query_df = pd.read_csv(args.input_file, sep=",")
+                elif args.input_file.endswith(".tsv"):
+                    query_df = pd.read_csv(args.input_file, sep="\t")
+                else:
+                    print("Unsupported file format")
+                    sys.exit(1)
 
-    elif args.input_file.endswith(".mgf"):
-        print("READING THE MGF FILE")
-        # output_results_df = masst_query_mgf_all(args.input_file, 
-        #                                 args.database, 
-        #                                 analog=analog_boolean,
-        #                                 precursor_mz_tol=args.precursor_tolerance,
-        #                                 fragment_mz_tol=args.fragment_tolerance)
-        queries_list = prep_query_mgf_queries(args.input_file,
-                                                args.database, 
-                                                analog=analog_boolean,
-                                                precursor_mz_tol=args.precursor_tolerance,
-                                                fragment_mz_tol=args.fragment_tolerance)
+            output_results_df = masst_query_usi_streaming(query_df, 
+                                            args.database, 
+                                            analog=analog_boolean,
+                                            precursor_mz_tol=args.precursor_tolerance,
+                                            fragment_mz_tol=args.fragment_tolerance)
 
-    elif args.input_file.lower().endswith(".mzml"):
-        print("READING THE MZML FILE")
-        output_results_df = masst_query_mzml_all(args.input_file,
-                                        args.database,
-                                        analog=analog_boolean,
-                                        precursor_mz_tol=args.precursor_tolerance,
-                                        fragment_mz_tol=args.fragment_tolerance)
 
-    # lets actually execute it
-    output_results_df = execute_all_queries(queries_list)
+        elif args.input_file.endswith(".mgf"):
+            print("READING THE MGF FILE")
+            output_results_df = masst_query_mgf_streaming(args.input_file, 
+                                            args.database, 
+                                            analog=analog_boolean,
+                                            precursor_mz_tol=args.precursor_tolerance,
+                                            fragment_mz_tol=args.fragment_tolerance)
+
+        elif args.input_file.lower().endswith(".mzml"):
+            print("READING THE MZML FILE")
+            output_results_df = masst_query_mzml_streaming(args.input_file,
+                                            args.database,
+                                            analog=analog_boolean,
+                                            precursor_mz_tol=args.precursor_tolerance,
+                                            fragment_mz_tol=args.fragment_tolerance)
+
+    # With batch
+    if args.querymode == "batch":
+
+        # checking extension
+        if args.input_file.endswith(".csv") or args.input_file.endswith(".tsv"):
+            try:
+                query_df = pd.read_csv(args.input_file, sep=None)
+            except:
+                query_df = pd.DataFrame()
+
+            # checking if usi in header
+            if "usi" not in query_df.columns:
+                # lets try to load with explicit extensions
+                if args.input_file.endswith(".csv"):
+                    query_df = pd.read_csv(args.input_file, sep=",")
+                elif args.input_file.endswith(".tsv"):
+                    query_df = pd.read_csv(args.input_file, sep="\t")
+                else:
+                    print("Unsupported file format")
+                    sys.exit(1)
+
+
+            queries_list = prep_query_usi_queries(query_df, 
+                                                    args.database, 
+                                                    analog=analog_boolean,
+                                                    precursor_mz_tol=args.precursor_tolerance,
+                                                    fragment_mz_tol=args.fragment_tolerance)
+
+        elif args.input_file.endswith(".mgf"):
+            print("READING THE MGF FILE")
+            queries_list = prep_query_mgf_queries(args.input_file,
+                                                    args.database, 
+                                                    analog=analog_boolean,
+                                                    precursor_mz_tol=args.precursor_tolerance,
+                                                    fragment_mz_tol=args.fragment_tolerance)
+
+        elif args.input_file.lower().endswith(".mzml"):
+            print("READING THE MZML FILE")
+            # output_results_df = masst_query_mzml_streaming(args.input_file,
+            #                                 args.database,
+            #                                 analog=analog_boolean,
+            #                                 precursor_mz_tol=args.precursor_tolerance,
+            #                                 fragment_mz_tol=args.fragment_tolerance)
+
+
+        # DEBUG
+        # queries_list = queries_list[0:5]
+
+        # lets actually execute it
+        output_results_df = execute_all_queries_batch(queries_list)
 
     output_results_df.to_csv(args.output_file, index=False, sep="\t")
 
