@@ -101,7 +101,6 @@ def execute_all_queries_sync(queries):
 
     for query in tqdm(queries):
         try:
-            # TODO check the type, to determine which API to use
             if query["datasource"] == "usi":
                 results_dict = fasst.query_fasst_api_usi(
                     query["usi"],
@@ -137,7 +136,7 @@ def execute_all_queries_sync(queries):
             raise
         except:
             print("Error in Query Execution")
-            raise
+            #raise
             pass
 
     if len(output_results_list) == 0:
@@ -184,16 +183,12 @@ def execute_all_queries_batch(queries):
                         blocking=False
                     )
                 
-                print("ZZZZZZZZZZZZZZZZZ", status)
                 status_results_list.append(status)
             except KeyboardInterrupt:
                 raise
             except:
                 print("Error in Query")
                 pass
-
-        print("+++++++++++++++++++")
-        print(status_results_list)
 
             
         # lets now wait for all the results to be ready and grab them
@@ -212,11 +207,11 @@ def execute_all_queries_batch(queries):
                     results = fasst.get_results(status, blocking=False)
                     if results == "PENDING":
                         status["status"] = "PENDING"
-                        print("XXXXXXXXXXXXXXXXXX\nPENDING Results for", i)
+                        print("=======================\nPENDING Results for", i)
                         pending_count += 1
                         continue
                     else:
-                        print("XXXXXXXXXXXXXXXXXXXX\nRESULTS DONE for", i)
+                        print("=======================\nRESULTS DONE for", i)
                         status["status"] = "DONE"
                         status["results"] = results["results"]
                         print("Total Hits", len(status["results"]))
@@ -238,7 +233,7 @@ def execute_all_queries_batch(queries):
         # Formatting all results
         for status in status_results_list:
             if status["status"] == "DONE":
-                print("XXXXXXXXXXXXXXXXXX Total Hits", len(status["results"]))
+                print("Total Hits", len(status["results"]))
 
                 results_df = pd.DataFrame(status["results"])
 
@@ -265,12 +260,6 @@ def execute_all_queries_batch(queries):
     output_results_df = pd.concat(output_results_list)
 
     return output_results_df
-
-
-
-
-
-
 
 
 
