@@ -214,13 +214,14 @@ def execute_all_queries_batch(queries):
                     results = fasst.get_results(status, blocking=False)
                     if results == "PENDING":
                         status["status"] = "PENDING"
-                        print("PENDING Results for", i)
+                        print("XXXXXXXXXXXXXXXXXX\nPENDING Results for", i)
                         pending_count += 1
                         continue
                     else:
-                        print("XXXXXXXXXXXXXXXXXXXX - RESULTS DONE for", i)
+                        print("XXXXXXXXXXXXXXXXXXXX\nRESULTS DONE for", i)
                         status["status"] = "DONE"
                         status["results"] = results["results"]
+                        print("Total Hits", len(status["results"]))
                 except KeyboardInterrupt:
                     raise
                 except:

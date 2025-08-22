@@ -20,7 +20,7 @@ test_masst_mzml:
 test_masst_usi_file_batch:
 	python ../bin/masst/masst_client.py ./data/test_usi.csv test_usi_results_batch.tsv \
 	--querymode batch \
-	--database gnpslibrary
+	--database metabolomicspanrepo_index_nightly
 
 test_masst_usi_file_big_batch:
 	python ../bin/masst/masst_client.py ./data/test_usi_big.csv test_usi_results_batch.tsv \
