@@ -320,11 +320,7 @@ def read_mzml_spectrum(file_path, drop_ms1=True):
 
                     selected_ion_list = precursor_list["selectedIonList"]
                     precursor_intensity = float(selected_ion_list["selectedIon"][0].get("peak intensity", 0))
-                    try:
-                        precursor_charge = int(selected_ion_list["selectedIon"][0].get("charge state", 0))
-                    except TypeError as e:
-                        precursor_charge = 0
-                        print(f"TypeError in spectrum {spectrum.get('id', 'unknown')}: {e}; converting to zero")
+                    precursor_charge = int(selected_ion_list["selectedIon"][0].get("charge state", 0))
 
                     fragmentation_method = "NO_FRAG"
                     totIonCurrent = float(spectrum.get("total ion current", 0))
