@@ -15,7 +15,7 @@ test_masst_mgf_fbmn:
 	--database gnpslibrary
 
 test_masst_mgf_mzmine:
-	python ../bin/masst/masst_client.py ./data/spectra_mzmine.mgf test_results_mzmine.tsv \
+	python ../bin/masst/masst_client.py ./data/carcinoma_iimn_fbmn.mgf test_results_mzmine.tsv \
 	--database gnpslibrary
 
 test_masst_mzml:
