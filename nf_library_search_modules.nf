@@ -115,8 +115,8 @@ process searchDataGNPSNew{
     mkdir -p search_results
 
     python $params.TOOL_FOLDER/gnps_new/main_search.py \
-        --gnps_lib_mgf "$input_library" \
-        --qry_file "$input_spectrum" \
+        --gnps_lib_mgf $input_library \
+        --qry_file $input_spectrum \
         --algorithm $search_algorithm \
         --analog_search $analog_search \
         --analog_max_shift $analog_max_shift \
@@ -155,7 +155,7 @@ process searchDataBlink {
     echo \$previous_cwd
 
     cd $params.TOOL_FOLDER/blink && python -m blink.blink_cli \
-    $input_spectrum_abs \
+    "$input_spectrum_abs" \
     $input_library_abs \
     \$previous_cwd/search_results/${randomFilename}.csv \
     $params.TOOL_FOLDER/blink/models/positive_random_forest.pickle \
