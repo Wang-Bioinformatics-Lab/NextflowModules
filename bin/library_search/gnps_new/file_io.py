@@ -15,8 +15,8 @@ def batch_process_queries(qry_file, min_peak, batch_size=1000):
     if file_format == '.mzml':
         with mzml.MzML(qry_file) as reader:
             for spectrum in reader:
-                if spectrum['ms level'] == 2:  # MS2 scans only
-                    try:
+                try:
+                    if spectrum['ms level'] == 2:  # MS2 scans only
                         precursor_mz = float(
                             spectrum['precursorList']['precursor'][0]['selectedIonList']['selectedIon'][0][
                                 'selected ion m/z'])
@@ -66,14 +66,14 @@ def batch_process_queries(qry_file, min_peak, batch_size=1000):
                             yield batch_specs, np.array(batch_prec_mzs)
                             batch_specs = []
                             batch_prec_mzs = []
-                    except:
-                        continue
+                except:
+                    continue
 
     elif file_format == '.mzxml':
         with mzxml.MzXML(qry_file) as reader:
             for spectrum in reader:
-                if spectrum['msLevel'] == 2:  # MS2 scans only
-                    try:
+                try:
+                    if spectrum['msLevel'] == 2:  # MS2 scans only
                         precursor_mz = float(spectrum['precursorMz'][0]['precursorMz'])
 
                         mz_array = np.array(spectrum['m/z array'])
@@ -118,8 +118,8 @@ def batch_process_queries(qry_file, min_peak, batch_size=1000):
                             yield batch_specs, np.array(batch_prec_mzs)
                             batch_specs = []
                             batch_prec_mzs = []
-                    except:
-                        continue
+                except:
+                    continue
 
     elif file_format == '.mgf':
         scan_idx = 0
