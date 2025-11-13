@@ -398,14 +398,18 @@ def main():
 
     
     args = parser.parse_args()
-    # print("starting to read files", args.spectrum_file, args.library_file)
-    # start_time = time.time()
-    spectrum_mgf = read_file(args.spectrum_file)
-    # print(len(spectrum_mgf))
-    library_mgf = read_file(args.library_file)
-    # print("Reading the files took:", time.time() - start_time, "seconds")
-    # start_time = time.time()
-    
+    try:
+        # print("starting to read files", args.spectrum_file, args.library_file)
+        # start_time = time.time()
+        spectrum_mgf = read_file(args.spectrum_file)
+        # print(len(spectrum_mgf))
+        library_mgf = read_file(args.library_file)
+        # print("Reading the files took:", time.time() - start_time, "seconds")
+        # start_time = time.time()
+    except Exception as e:
+        print("Not able to read the input files. Exiting.", e)
+        sys.exit(0)
+        
     if len(spectrum_mgf) == 0 or len(library_mgf) == 0:
         print("No spectra found in the input files. Exiting.")
         sys.exit(0)
