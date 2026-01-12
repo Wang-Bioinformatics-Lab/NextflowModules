@@ -15,3 +15,4 @@ dependencies:
     - requests_cache
     - tqdm
     - pyteomics
+    - pynumpress
