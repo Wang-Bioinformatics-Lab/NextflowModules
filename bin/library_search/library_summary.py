@@ -70,6 +70,7 @@ def main():
             output_dictionary["charge"] = charge
             output_dictionary["adduct"] = adduct
             output_dictionary["precursormz"] = precursormz
+            output_dictionary["scan"] = scan
             
             output_list.append(output_dictionary)
 
