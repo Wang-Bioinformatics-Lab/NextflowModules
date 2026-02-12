@@ -8,6 +8,10 @@ import requests_cache
 from tqdm import tqdm
 from pyteomics import mgf
 from pyteomics import mzml
+
+# inserting path to local folder for gnpsdata if not installed
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 from gnpsdata import fasst
 
 # this provides a list of queries dicts
