@@ -27,3 +27,22 @@ process processXIC {
     --rt_min_tolernace "${rt_min_tolernace}"
     """
 }
+
+process reformatQuant {
+    publishDir "$params.publishdir/feature_augment_quant", mode: 'copy'
+
+    conda "$params.TOOL_FOLDER/conda_env.yml"
+
+    input:
+    file merged_quant_file
+
+    output:
+    file 'feature_table.csv'
+
+    """
+    python $params.TOOL_FOLDER/reformat_quant.py \
+    $merged_quant_file \
+    feature_table.csv
+    """
+
+}
