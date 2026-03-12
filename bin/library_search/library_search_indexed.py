@@ -1,9 +1,8 @@
-
-
 import sys
 import getopt
 import os
 import json
+import pickle
 import argparse
 import uuid
 import pandas as pd
@@ -398,12 +397,20 @@ def main():
 
     
     args = parser.parse_args()
+    is_lib_obj = False
     try:
         # print("starting to read files", args.spectrum_file, args.library_file)
         # start_time = time.time()
         spectrum_mgf = read_file(args.spectrum_file)
         # print(len(spectrum_mgf))
-        library_mgf = read_file(args.library_file)
+        if args.library_file.endswith("library_obj.pkl"):
+            with open(args.library_file, "rb") as f:
+                library_obj = pickle.load(f)
+            library_mgf = library_obj["library_mgf"]
+            library_list = library_obj["library_list"]
+            is_lib_obj = True
+        else:
+            library_mgf = read_file(args.library_file)
         # print("Reading the files took:", time.time() - start_time, "seconds")
         # start_time = time.time()
     except Exception as e:
@@ -427,7 +434,8 @@ def main():
                                                  filter_window=(args.filter_window == 1))
 
     spectrum_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in spectrum_mgf]
-    library_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in library_mgf]
+    if not is_lib_obj:
+        library_list = [convert_single_spectrum_to_spectrum_list(spec) for spec in library_mgf]
 
     # print("Converting spectra to spectrum list format and cleaning took:", time.time() - start_time, "seconds")
     # start_time = time.time()
@@ -440,7 +448,6 @@ def main():
     
     library_shared_idx = gnps_index.create_index(converted_library_list, False, args.fragment_tolerance, gnps_index.SHIFTED_OFFSET)
     library_shifted_idx = gnps_index.create_index(converted_library_list, True, args.fragment_tolerance, gnps_index.SHIFTED_OFFSET)
-    
     
     # print("Creating library index took:", time.time() - start_time, "seconds")
     # start_time = time.time()

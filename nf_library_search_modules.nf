@@ -1,6 +1,36 @@
 params.TOOL_FOLDER = "$moduleDir/bin/library_search"
 params.publishdir = "./nf_output"
 
+process writeLibraryObjectIndexed {
+    //publishDir "./nf_output", mode: 'copy'
+
+    conda "$params.TOOL_FOLDER/conda_env.yml"
+
+    cache 'lenient'
+
+    input:
+    file input_library
+    val fragment_tolerance
+    val filter_precursor
+    val filter_window
+
+    output:
+    file 'library_obj.pkl' //optional true
+
+    """
+    mkdir -p search_results
+
+    python $params.TOOL_FOLDER/write_library_obj_indexed.py \
+        $input_library \
+        search_results \
+        $params.TOOL_FOLDER/convert \
+        $params.TOOL_FOLDER/main_execmodule.allcandidates \
+        --fragment_tolerance "$fragment_tolerance" \
+        --filter_precursor "$filter_precursor" \
+        --filter_window "$filter_window"
+    """
+}
+
 process searchDataGNPS {
     //publishDir "./nf_output", mode: 'copy'
 
@@ -45,6 +75,18 @@ process searchDataGNPS {
 
 process searchDataGNPSIndexed {
     //publishDir "./nf_output", mode: 'copy'
+    errorStrategy {
+        if( task.exitStatus == 137 )
+            return 'ignore'
+        else if( task.exitStatus == 140 )
+            return 'ignore'
+        else
+            return 'terminate'
+    }
+    maxRetries 1
+    
+    memory {8.GB * task.attempt}
+    time {0.5.hour * task.attempt}
 
     conda "$params.TOOL_FOLDER/conda_env.yml"
 
