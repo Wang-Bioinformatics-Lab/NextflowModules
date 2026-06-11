@@ -272,7 +272,19 @@ def read_mgf(mgf_path, buffer_size=8192):
             if spectrum is None:
                 break
             result.append(spectrum)
-        
+
+    # Scans must be all-present or all-absent; scan-less MGFs are numbered by position.
+    n_with_scan = sum(1 for s in result if str(s.get('SCANS', '')).strip() != '')
+    if n_with_scan == 0:
+        for ordinal, spectrum in enumerate(result, start=1):
+            spectrum['SCANS'] = ordinal
+    elif n_with_scan != len(result):
+        raise ValueError(
+            f"'{mgf_path}' has inconsistent scan numbering: {n_with_scan} of "
+            f"{len(result)} spectra declare a SCANS= line. Either all spectra must "
+            f"declare SCANS= or none should."
+        )
+
     return result
 
 def read_mzml_spectrum(file_path, drop_ms1=True):
